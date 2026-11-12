@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0 WITH LLVM-exception"
+repository = "https://github.com/AstroBlocksMod/thatch"
+
+[workspace.dependencies]
+thatch-abi = { path = "crates/thatch-abi" }
+thatch-codegen = { path = "crates/thatch-codegen" }
+thatch-ir = { path = "crates/thatch-ir" }
+thatch-runtime = { path = "crates/thatch-runtime" }
+thatch-sb3 = { path = "crates/thatch-sb3" }
+thatch-scratch = { path = "crates/thatch-scratch" }
+thatch-values = { path = "crates/thatch-values" }
+
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+corosensei = "0.3.4"
+cranelift-codegen = "0.137.1"
+cranelift-frontend = "0.137.1"
+cranelift-jit = "0.137.1"
+cranelift-module = "0.137.1"
+cranelift-native = "0.137.1"
+cranelift-object = "0.137.1"
+ryu-js = "1.0.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+thiserror = "2.0.21"
+zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+missing_debug_implementations = "allow"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+
+[profile.release]
+debug = 1

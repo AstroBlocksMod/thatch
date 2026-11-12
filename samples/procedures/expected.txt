@@ -1,0 +1,9 @@
+Cat says: 3
+Cat says: B1
+Cat says: B2
+Cat says: 2
+Cat says: 1
+Cat says: LOUD
+Cat says: 100000
+Cat says: hello world
+Cat says: hello world

@@ -1,0 +1,22 @@
+[package]
+name = "thatch-cli"
+description = "The thatch command"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "thatch"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+thatch-codegen.workspace = true
+thatch-ir.workspace = true
+thatch-runtime.workspace = true
+thatch-sb3.workspace = true
+thatch-scratch.workspace = true
+
+[lints]
+workspace = true

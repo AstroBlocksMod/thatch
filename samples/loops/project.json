@@ -1,0 +1,71 @@
+{
+  "targets": [
+    {
+      "isStage": true,
+      "name": "Stage",
+      "variables": { "v_i": ["i", 0], "v_sum": ["sum", 0], "v_text": ["text", ""] },
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {},
+      "currentCostume": 0,
+      "costumes": [{ "name": "backdrop1", "assetId": "cd21514d0531fdffb22204e0ec5ed84a", "md5ext": "cd21514d0531fdffb22204e0ec5ed84a.svg", "dataFormat": "svg", "rotationCenterX": 240, "rotationCenterY": 180 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 0,
+      "tempo": 60,
+      "videoTransparency": 50,
+      "videoState": "off"
+    },
+    {
+      "isStage": false,
+      "name": "Cat",
+      "variables": {},
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {
+        "flag": { "opcode": "event_whenflagclicked", "next": "callSum", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 0 },
+        "callSum": { "opcode": "procedures_call", "next": "saySum", "parent": "flag", "inputs": { "argN": [1, [10, "100000"]] }, "fields": {}, "shadow": false, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "proccode": "sum up to %s", "argumentids": "[\"argN\"]", "warp": "true" } },
+        "saySum": { "opcode": "looks_say", "next": "setI", "parent": "callSum", "inputs": { "MESSAGE": [3, "joinSum", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "joinSum": { "opcode": "operator_join", "next": null, "parent": "saySum", "inputs": { "STRING1": [1, [10, "sum "]], "STRING2": [3, [12, "sum", "v_sum"], [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "setI": { "opcode": "data_setvariableto", "next": "setText", "parent": "saySum", "inputs": { "VALUE": [1, [10, "0"]] }, "fields": { "VARIABLE": ["i", "v_i"] }, "shadow": false, "topLevel": false },
+        "setText": { "opcode": "data_setvariableto", "next": "repText", "parent": "setI", "inputs": { "VALUE": [1, [10, ""]] }, "fields": { "VARIABLE": ["text", "v_text"] }, "shadow": false, "topLevel": false },
+        "repText": { "opcode": "control_repeat", "next": "sayText", "parent": "setText", "inputs": { "TIMES": [1, [6, "2000"]], "SUBSTACK": [2, "chgI"] }, "fields": {}, "shadow": false, "topLevel": false },
+        "chgI": { "opcode": "data_changevariableby", "next": "ifMod", "parent": "repText", "inputs": { "VALUE": [1, [4, "1"]] }, "fields": { "VARIABLE": ["i", "v_i"] }, "shadow": false, "topLevel": false },
+        "ifMod": { "opcode": "control_if", "next": null, "parent": "chgI", "inputs": { "CONDITION": [2, "modEq"], "SUBSTACK": [2, "appendText"] }, "fields": {}, "shadow": false, "topLevel": false },
+        "modEq": { "opcode": "operator_equals", "next": null, "parent": "ifMod", "inputs": { "OPERAND1": [3, "mod", [10, ""]], "OPERAND2": [1, [10, "0"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "mod": { "opcode": "operator_mod", "next": null, "parent": "modEq", "inputs": { "NUM1": [3, [12, "i", "v_i"], [4, ""]], "NUM2": [1, [4, "500"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "appendText": { "opcode": "data_setvariableto", "next": null, "parent": "ifMod", "inputs": { "VALUE": [3, "joinText", [10, ""]] }, "fields": { "VARIABLE": ["text", "v_text"] }, "shadow": false, "topLevel": false },
+        "joinText": { "opcode": "operator_join", "next": null, "parent": "appendText", "inputs": { "STRING1": [3, [12, "text", "v_text"], [10, ""]], "STRING2": [3, "joinI", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "joinI": { "opcode": "operator_join", "next": null, "parent": "joinText", "inputs": { "STRING1": [3, [12, "i", "v_i"], [10, ""]], "STRING2": [1, [10, " "]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayText": { "opcode": "looks_say", "next": null, "parent": "repText", "inputs": { "MESSAGE": [3, [12, "text", "v_text"], [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "flagB": { "opcode": "event_whenflagclicked", "next": "repB", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 400 },
+        "repB": { "opcode": "control_repeat", "next": "sayB", "parent": "flagB", "inputs": { "TIMES": [1, [6, "3"]], "SUBSTACK": [2, "sayTick"] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayTick": { "opcode": "looks_say", "next": null, "parent": "repB", "inputs": { "MESSAGE": [3, "joinTick", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "joinTick": { "opcode": "operator_join", "next": null, "parent": "sayTick", "inputs": { "STRING1": [1, [10, "other script sees i = "]], "STRING2": [3, [12, "i", "v_i"], [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayB": { "opcode": "looks_say", "next": null, "parent": "repB", "inputs": { "MESSAGE": [1, [10, "other script done"]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "defSum": { "opcode": "procedures_definition", "next": "setSum", "parent": null, "inputs": { "custom_block": [1, "protoSum"] }, "fields": {}, "shadow": false, "topLevel": true, "x": 600, "y": 0 },
+        "protoSum": { "opcode": "procedures_prototype", "next": null, "parent": "defSum", "inputs": { "argN": [1, "repN"] }, "fields": {}, "shadow": true, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "proccode": "sum up to %s", "argumentids": "[\"argN\"]", "argumentnames": "[\"n\"]", "argumentdefaults": "[\"\"]", "warp": "true" } },
+        "repN": { "opcode": "argument_reporter_string_number", "next": null, "parent": "protoSum", "inputs": {}, "fields": { "VALUE": ["n", null] }, "shadow": true, "topLevel": false },
+        "setSum": { "opcode": "data_setvariableto", "next": "setK", "parent": "defSum", "inputs": { "VALUE": [1, [10, "0"]] }, "fields": { "VARIABLE": ["sum", "v_sum"] }, "shadow": false, "topLevel": false },
+        "setK": { "opcode": "data_setvariableto", "next": "repSum", "parent": "setSum", "inputs": { "VALUE": [1, [10, "0"]] }, "fields": { "VARIABLE": ["i", "v_i"] }, "shadow": false, "topLevel": false },
+        "repSum": { "opcode": "control_repeat", "next": null, "parent": "setK", "inputs": { "TIMES": [3, "n1", [6, ""]], "SUBSTACK": [2, "chgK"] }, "fields": {}, "shadow": false, "topLevel": false },
+        "n1": { "opcode": "argument_reporter_string_number", "next": null, "parent": "repSum", "inputs": {}, "fields": { "VALUE": ["n", null] }, "shadow": false, "topLevel": false },
+        "chgK": { "opcode": "data_changevariableby", "next": "chgSum", "parent": "repSum", "inputs": { "VALUE": [1, [4, "1"]] }, "fields": { "VARIABLE": ["i", "v_i"] }, "shadow": false, "topLevel": false },
+        "chgSum": { "opcode": "data_changevariableby", "next": null, "parent": "chgK", "inputs": { "VALUE": [3, "mulK", [4, ""]] }, "fields": { "VARIABLE": ["sum", "v_sum"] }, "shadow": false, "topLevel": false },
+        "mulK": { "opcode": "operator_multiply", "next": null, "parent": "chgSum", "inputs": { "NUM1": [3, [12, "i", "v_i"], [4, ""]], "NUM2": [3, "modK", [4, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "modK": { "opcode": "operator_mod", "next": null, "parent": "mulK", "inputs": { "NUM1": [3, [12, "i", "v_i"], [4, ""]], "NUM2": [1, [4, "7"]] }, "fields": {}, "shadow": false, "topLevel": false }
+      },
+      "currentCostume": 0,
+      "costumes": [{ "name": "costume1", "assetId": "bcf454acf82e4504149f7ffe07081dbc", "md5ext": "bcf454acf82e4504149f7ffe07081dbc.svg", "dataFormat": "svg", "rotationCenterX": 48, "rotationCenterY": 50 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 1,
+      "visible": true, "x": 0, "y": 0, "size": 100, "direction": 90, "draggable": false, "rotationStyle": "all around"
+    }
+  ],
+  "monitors": [],
+  "extensions": [],
+  "meta": { "semver": "3.0.0", "vm": "0.2.0", "agent": "" }
+}

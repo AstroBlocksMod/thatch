@@ -1,0 +1,6 @@
+Cat says: sum 15000250005
+Cat says: other script sees i = 1
+Cat says: other script sees i = 2
+Cat says: other script sees i = 3
+Cat says: other script done
+Cat says: 500 1000 1500 2000 

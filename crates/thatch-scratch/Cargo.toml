@@ -1,0 +1,16 @@
+[package]
+name = "thatch-scratch"
+description = "The Scratch frontend: lowers a Scratch 3 project to the Thatch IR"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+thatch-ir.workspace = true
+thatch-sb3.workspace = true
+thatch-values.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

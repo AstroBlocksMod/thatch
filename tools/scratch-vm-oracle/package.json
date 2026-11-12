@@ -1,0 +1,9 @@
+{
+  "name": "thatch-scratch-vm-oracle",
+  "private": true,
+  "description": "Runs a project on scratch-vm and prints what sprites say, for the expected output of Thatch's samples.",
+  "license": "Apache-2.0 WITH LLVM-exception",
+  "dependencies": {
+    "@scratch/scratch-vm": "15.3.0"
+  }
+}

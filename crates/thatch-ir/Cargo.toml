@@ -1,0 +1,11 @@
+[package]
+name = "thatch-ir"
+description = "The language-neutral, backend-neutral intermediate representation of Thatch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

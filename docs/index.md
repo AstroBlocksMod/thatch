@@ -1,0 +1,21 @@
+# Thatch
+
+Thatch is an ahead-of-time compiler that turns Scratch projects into standalone native executables. It reads a standard `.sb3` file, lowers the blocks to a typed intermediate representation, generates machine code with Cranelift and links the result against a small runtime. There is no browser and no JavaScript engine in the result: a `forever` loop is a loop, a variable is a number in memory, and a custom block is a function.
+
+It is written in Rust and licensed under Apache-2.0 with LLVM exceptions, so the programs it builds can be shipped under any license.
+
+## What it does today
+
+Thatch is at the MVP stage. It compiles and runs projects that use the blocks on the [supported blocks](blocks.md) page: variables, the operators, the control blocks, custom blocks with and without "run without screen refresh", broadcasts, `say` and `think`, waits and the timer. Compiled programs run headless and print what sprites say. Every sample in `samples/` prints exactly what scratch-vm prints for it, which is the measure Thatch holds itself to.
+
+What it does not do yet: anything that needs a stage (motion, looks, pen, sound, sensing) and a host that draws, which come next, and then lists and clones. The [roadmap](roadmap.md) has the plan.
+
+## Where it is going
+
+Thatch is built to grow in three directions without starting over:
+
+- **Engine-agnostic.** Compiled programs talk to the outside world only through a small, versioned [C ABI](abi.md). The headless host is the first implementation; a host that renders through ScratchEverywhere, another engine, or a plain window implements the same functions.
+- **Backend-agnostic.** The [IR](ir.md) knows nothing about Scratch or about Cranelift. Cranelift comes first because it compiles fast; an LLVM backend can take the same IR when the last few percent of speed matter more than compile time.
+- **A Scratch superset, and then Snap!.** Once vanilla projects run exactly, the plan is real functions with return values, static types, compile-time macros and FFI into the host, and then a Snap! frontend with closures and nested lists, lowering to the same IR.
+
+Start with [getting started](getting-started.md).

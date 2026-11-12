@@ -1,0 +1,6 @@
+Cat says: waiting
+Cat says: side script after a quarter second
+Cat says: done waiting
+Cat says: the loop kept ticking
+Cat says: timer passed 0.2
+Cat says: stopping everything
