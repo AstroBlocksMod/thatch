@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "skills": {
+    "ast-grep": {
+      "source": "ast-grep/agent-skill",
+      "sourceType": "github",
+      "skillPath": "ast-grep/skills/ast-grep/SKILL.md",
+      "computedHash": "66228b33a8e8327e2f3eeef8b7c9135bfd0e9ed11990529b0f1cef4d8fc7bf55"
+    },
+    "ast-grep-outline": {
+      "source": "ast-grep/agent-skill",
+      "sourceType": "github",
+      "skillPath": "ast-grep/skills/outline/SKILL.md",
+      "computedHash": "240558dce6653c89adda273a3de85337fcd50e9408fb48880f85908b49ffbc32"
+    },
+    "gh-stack": {
+      "source": "github/gh-stack",
+      "sourceType": "github",
+      "skillPath": "skills/gh-stack/SKILL.md",
+      "computedHash": "4ff26e30a0103af77552e5eebbabfbf80734fd23b1485f0c513a0b35a3126613"
+    }
+  }
+}
