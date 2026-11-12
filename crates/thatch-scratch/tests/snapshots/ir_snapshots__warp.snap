@@ -1,0 +1,31 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = "spin done"
+str 1 = "B set x"
+str 2 = "stopping"
+target "Stage" (stage)
+target "Cat"
+  num 0 "x" = 0
+  script FlagClicked -> fn 2
+  script FlagClicked -> fn 3
+fn 0 "Cat/spin until x is set"() warp
+  loop
+    if Gt(TargetNum(0), 3)
+      break
+    yield
+fn 1 "Cat/spin forever"() warp
+  loop
+    yield
+fn 2 "Cat/flag flagA"()
+  call fn 0() nesting 0
+  Say((any)str 0)
+  call fn 1() nesting 0
+fn 3 "Cat/flag flagB"()
+  Wait(0)
+  set TargetNum(0) = 5
+  Say((any)str 1)
+  Wait(0)
+  Say((any)str 2)
+  StopAll()

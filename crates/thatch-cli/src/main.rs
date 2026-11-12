@@ -85,8 +85,19 @@ fn run(project: &Path, options: RunOptions) -> anyhow::Result<()> {
     // SAFETY: the address is the init function the compiler just produced for this ABI.
     let init: thatch_runtime::InitFn =
         unsafe { std::mem::transmute::<*const u8, thatch_runtime::InitFn>(compiled.init_address()) };
-    thatch_runtime::run(init, &options).map_err(anyhow::Error::msg)?;
+    thatch_runtime::run(init, compiled.abi_version(), &options).map_err(anyhow::Error::msg)?;
     Ok(())
+}
+
+/// The libraries a Rust static library needs from the system, as `rustc --print
+/// native-static-libs` lists them for each platform.
+fn system_libs() -> anyhow::Result<&'static [&'static str]> {
+    Ok(match std::env::consts::OS {
+        "linux" => &["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"],
+        "macos" => &["-liconv", "-lSystem", "-lc", "-lm"],
+        "freebsd" | "openbsd" | "netbsd" => &["-lexecinfo", "-lpthread", "-lm", "-lc"],
+        other => bail!("linking is not supported on {other} yet; use --object and link by hand"),
+    })
 }
 
 fn build(
@@ -99,25 +110,34 @@ fn build(
     let bytes = thatch_codegen::compile_object(&lowered.program)?;
     let stem = project.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "program".to_owned());
     let output = output.unwrap_or_else(|| PathBuf::from(if object_only { format!("{stem}.o") } else { stem.clone() }));
+    // Everything is written into a fresh private directory next to the output and moved into
+    // place at the end, so a failed build leaves an existing output alone and nobody can plant a
+    // path for the intermediate files.
+    let parent = output.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let work = tempfile::Builder::new()
+        .prefix(".thatch-build-")
+        .tempdir_in(parent)
+        .with_context(|| format!("could not create a work directory in {}", parent.display()))?;
+    let object = work.path().join(format!("{stem}.o"));
+    std::fs::write(&object, bytes).with_context(|| format!("could not write {}", object.display()))?;
     if object_only {
-        std::fs::write(&output, bytes).with_context(|| format!("could not write {}", output.display()))?;
+        std::fs::rename(&object, &output).with_context(|| format!("could not write {}", output.display()))?;
         return Ok(());
     }
     let runtime = find_runtime_lib(runtime_lib)?;
-    let object = std::env::temp_dir().join(format!("thatch-{}-{}.o", stem, std::process::id()));
-    std::fs::write(&object, bytes).with_context(|| format!("could not write {}", object.display()))?;
+    let exe = work.path().join(&stem);
     let status = Command::new("cc")
         .arg("-o")
-        .arg(&output)
+        .arg(&exe)
         .arg(&object)
         .arg(&runtime)
-        .args(["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"])
+        .args(system_libs()?)
         .status()
         .context("could not run cc; a C compiler is needed to link")?;
-    let _ = std::fs::remove_file(&object);
     if !status.success() {
         bail!("linking failed");
     }
+    std::fs::rename(&exe, &output).with_context(|| format!("could not write {}", output.display()))?;
     Ok(())
 }
 

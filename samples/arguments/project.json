@@ -1,0 +1,59 @@
+{
+  "targets": [
+    {
+      "isStage": true,
+      "name": "Stage",
+      "variables": { "v_g": ["g", "global old"] },
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {},
+      "currentCostume": 0,
+      "costumes": [{ "name": "backdrop1", "assetId": "cd21514d0531fdffb22204e0ec5ed84a", "md5ext": "cd21514d0531fdffb22204e0ec5ed84a.svg", "dataFormat": "svg", "rotationCenterX": 240, "rotationCenterY": 180 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 0,
+      "tempo": 60,
+      "videoTransparency": 50,
+      "videoState": "off"
+    },
+    {
+      "isStage": false,
+      "name": "Cat",
+      "variables": { "v_s": ["s", ""] },
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {
+        "flag": { "opcode": "event_whenflagclicked", "next": "setS", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 0 },
+        "setS": { "opcode": "data_setvariableto", "next": "callP", "parent": "flag", "inputs": { "VALUE": [1, [10, "old"]] }, "fields": { "VARIABLE": ["s", "v_s"] }, "shadow": false, "topLevel": false },
+        "callP": { "opcode": "procedures_call", "next": "sayS", "parent": "setS", "inputs": { "argA": [3, [12, "s", "v_s"], [10, ""]], "argB": [3, [12, "g", "v_g"], [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "proccode": "show %s and %s", "argumentids": "[\"argA\",\"argB\"]", "warp": "false" } },
+        "sayS": { "opcode": "looks_say", "next": null, "parent": "callP", "inputs": { "MESSAGE": [3, [12, "s", "v_s"], [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "defP": { "opcode": "procedures_definition", "next": "setInS", "parent": null, "inputs": { "custom_block": [1, "protoP"] }, "fields": {}, "shadow": false, "topLevel": true, "x": 400, "y": 0 },
+        "protoP": { "opcode": "procedures_prototype", "next": null, "parent": "defP", "inputs": { "argA": [1, "repA"], "argB": [1, "repB"] }, "fields": {}, "shadow": true, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "proccode": "show %s and %s", "argumentids": "[\"argA\",\"argB\"]", "argumentnames": "[\"a\",\"b\"]", "argumentdefaults": "[\"\",\"\"]", "warp": "false" } },
+        "repA": { "opcode": "argument_reporter_string_number", "next": null, "parent": "protoP", "inputs": {}, "fields": { "VALUE": ["a", null] }, "shadow": true, "topLevel": false },
+        "repB": { "opcode": "argument_reporter_string_number", "next": null, "parent": "protoP", "inputs": {}, "fields": { "VALUE": ["b", null] }, "shadow": true, "topLevel": false },
+        "setInS": { "opcode": "data_setvariableto", "next": "setInG", "parent": "defP", "inputs": { "VALUE": [1, [10, "new"]] }, "fields": { "VARIABLE": ["s", "v_s"] }, "shadow": false, "topLevel": false },
+        "setInG": { "opcode": "data_setvariableto", "next": "sayA", "parent": "setInS", "inputs": { "VALUE": [1, [10, "global new"]] }, "fields": { "VARIABLE": ["g", "v_g"] }, "shadow": false, "topLevel": false },
+        "sayA": { "opcode": "looks_say", "next": "sayBArg", "parent": "setInG", "inputs": { "MESSAGE": [3, "a1", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "a1": { "opcode": "argument_reporter_string_number", "next": null, "parent": "sayA", "inputs": {}, "fields": { "VALUE": ["a", null] }, "shadow": false, "topLevel": false },
+        "sayBArg": { "opcode": "looks_say", "next": null, "parent": "sayA", "inputs": { "MESSAGE": [3, "b1", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "b1": { "opcode": "argument_reporter_string_number", "next": null, "parent": "sayBArg", "inputs": {}, "fields": { "VALUE": ["b", null] }, "shadow": false, "topLevel": false }
+      },
+      "currentCostume": 0,
+      "costumes": [{ "name": "costume1", "assetId": "bcf454acf82e4504149f7ffe07081dbc", "md5ext": "bcf454acf82e4504149f7ffe07081dbc.svg", "dataFormat": "svg", "rotationCenterX": 48, "rotationCenterY": 50 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 1,
+      "visible": true,
+      "x": 0,
+      "y": 0,
+      "size": 100,
+      "direction": 90,
+      "draggable": false,
+      "rotationStyle": "all around"
+    }
+  ],
+  "monitors": [],
+  "extensions": [],
+  "meta": { "semver": "3.0.0", "vm": "0.2.0", "agent": "" }
+}

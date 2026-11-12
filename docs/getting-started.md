@@ -8,7 +8,13 @@ You need a Rust toolchain (the version is pinned in `rust-toolchain.toml`; rustu
 cargo build --workspace --release
 ```
 
-This builds the `thatch` command and `libthatch_runtime.a`, the runtime that every compiled program links against, side by side in `target/release/`.
+This builds the `thatch` command and `libthatch_runtime.a`, the runtime that every compiled program links against, side by side in `target/release/`. The examples below call it as `thatch`, so put that directory on your `PATH`:
+
+```sh
+export PATH="$PWD/target/release:$PATH"
+```
+
+Running `target/release/thatch` directly works too. Keep the two files together, since `thatch build` looks for the runtime library next to the `thatch` executable.
 
 ## Running a project
 

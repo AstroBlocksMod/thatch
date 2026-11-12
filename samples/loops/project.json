@@ -24,7 +24,7 @@
       "broadcasts": {},
       "blocks": {
         "flag": { "opcode": "event_whenflagclicked", "next": "callSum", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 0 },
-        "callSum": { "opcode": "procedures_call", "next": "saySum", "parent": "flag", "inputs": { "argN": [1, [10, "100000"]] }, "fields": {}, "shadow": false, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "proccode": "sum up to %s", "argumentids": "[\"argN\"]", "warp": "true" } },
+        "callSum": { "opcode": "procedures_call", "next": "saySum", "parent": "flag", "inputs": { "argN": [1, [10, "20000"]] }, "fields": {}, "shadow": false, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "proccode": "sum up to %s", "argumentids": "[\"argN\"]", "warp": "true" } },
         "saySum": { "opcode": "looks_say", "next": "setI", "parent": "callSum", "inputs": { "MESSAGE": [3, "joinSum", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
         "joinSum": { "opcode": "operator_join", "next": null, "parent": "saySum", "inputs": { "STRING1": [1, [10, "sum "]], "STRING2": [3, [12, "sum", "v_sum"], [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
         "setI": { "opcode": "data_setvariableto", "next": "setText", "parent": "saySum", "inputs": { "VALUE": [1, [10, "0"]] }, "fields": { "VARIABLE": ["i", "v_i"] }, "shadow": false, "topLevel": false },

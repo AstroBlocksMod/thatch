@@ -1,0 +1,23 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = "global old"
+str 1 = "old"
+str 2 = "new"
+str 3 = "global new"
+str 4 = ""
+target "Stage" (stage)
+  any 0 "g" = Str(StrId(0))
+target "Cat"
+  any 0 "s" = Str(StrId(4))
+  script FlagClicked -> fn 1
+fn 0 "Cat/show %s and %s"(a: any, b: any)
+  set TargetAny(0) = str 2
+  set StageAny(0) = str 3
+  Say(Param(0))
+  Say(Param(1))
+fn 1 "Cat/flag flag"()
+  set TargetAny(0) = str 1
+  call fn 0(TargetAny(0), StageAny(0)) nesting 0
+  Say(TargetAny(0))

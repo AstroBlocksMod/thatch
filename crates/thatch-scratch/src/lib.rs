@@ -8,7 +8,7 @@
 //! demotes a variable to dynamically typed when something stores a non-number in it, and a parameter
 //! when some call passes one. The last pass, where nothing changes, produces the program.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use thatch_ir::{
     AnyVar, BinOp, Const, Expr, FuncId, Function, Hat, MATH_OPS, NumVar, Param, Program, RtExpr, RtStmt, Script, Stmt,
@@ -20,6 +20,10 @@ use thatch_sb3::{Block, Input, Primitive, Project, field_id, field_value, parse_
 pub enum Error {
     #[error("the project has no stage")]
     NoStage,
+    #[error("{target}: block {block} is part of a cycle of blocks, which is not a valid script")]
+    Cycle { target: String, block: String },
+    #[error("{target}: custom block {proccode:?} has {ids} argument ids but {names} argument names")]
+    ArgumentMetadata { target: String, proccode: String, ids: usize, names: usize },
 }
 
 /// Something the frontend could not translate faithfully.
@@ -50,10 +54,13 @@ pub fn lower(project: &Project) -> Result<Lowered, Error> {
     let stage = project.stage().ok_or(Error::NoStage)?;
     targets.insert(0, stage);
 
-    let mut types = Types::new(&targets);
+    let mut types = Types::new(&targets)?;
     loop {
         let mut lowerer = Lowerer::new(&targets, &types);
         let program = lowerer.lower_all();
+        if let Some(error) = lowerer.error.take() {
+            return Err(error);
+        }
         if lowerer.changed {
             types = lowerer.types;
             continue;
@@ -93,24 +100,24 @@ struct Types {
 }
 
 impl Types {
-    fn new(targets: &[&thatch_sb3::Target]) -> Self {
+    fn new(targets: &[&thatch_sb3::Target]) -> Result<Self, Error> {
         let vars = targets
             .iter()
             .map(|t| {
                 let mut vars: Vec<VarInfo> = t
                     .variable_list()
                     .into_iter()
-                    .map(|(id, name, initial)| {
-                        let numeric = initial_number(&initial).is_some();
-                        VarInfo { id, name, initial, numeric, index: 0 }
+                    .map(|v| {
+                        let numeric = initial_number(&v.value).is_some();
+                        VarInfo { id: v.id, name: v.name, initial: v.value, numeric, index: 0 }
                     })
                     .collect();
                 assign_indices(&mut vars);
                 vars
             })
             .collect();
-        let procs = targets.iter().map(|t| find_procedures(t)).collect();
-        Self { vars, procs }
+        let procs = targets.iter().map(|t| find_procedures(t)).collect::<Result<_, _>>()?;
+        Ok(Self { vars, procs })
     }
 }
 
@@ -136,7 +143,7 @@ fn initial_number(v: &serde_json::Value) -> Option<f64> {
     }
 }
 
-fn find_procedures(target: &thatch_sb3::Target) -> Vec<ProcInfo> {
+fn find_procedures(target: &thatch_sb3::Target) -> Result<Vec<ProcInfo>, Error> {
     let mut procs = Vec::new();
     for (id, block) in target.all_blocks() {
         if block.opcode != "procedures_definition" || !block.top_level {
@@ -150,6 +157,14 @@ fn find_procedures(target: &thatch_sb3::Target) -> Vec<ProcInfo> {
         let mutation = proto.mutation.clone().unwrap_or_default();
         let arg_ids = mutation.argument_ids();
         let arg_names = mutation.argument_names();
+        if arg_ids.len() != arg_names.len() {
+            return Err(Error::ArgumentMetadata {
+                target: target.name.clone(),
+                proccode: mutation.proccode.clone(),
+                ids: arg_ids.len(),
+                names: arg_names.len(),
+            });
+        }
         let param_types = arg_ids
             .iter()
             .map(|arg_id| {
@@ -171,7 +186,7 @@ fn find_procedures(target: &thatch_sb3::Target) -> Vec<ProcInfo> {
             warp: mutation.is_warp(),
         });
     }
-    procs
+    Ok(procs)
 }
 
 struct Lowerer<'a> {
@@ -179,6 +194,8 @@ struct Lowerer<'a> {
     types: Types,
     changed: bool,
     warnings: Vec<Warning>,
+    /// The first malformed thing found; lowering goes on but the result is thrown away.
+    error: Option<Error>,
     program: Program,
     /// Function ids of procedures, by (target, procedure index).
     proc_funcs: HashMap<(usize, usize), FuncId>,
@@ -186,7 +203,9 @@ struct Lowerer<'a> {
     target: usize,
     proc: Option<usize>,
     nesting: u32,
-    warp: bool,
+    /// The blocks being lowered right now, from the script's top down to the current block, to
+    /// notice a block that leads back to itself.
+    visiting: HashSet<String>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -196,13 +215,34 @@ impl<'a> Lowerer<'a> {
             types: types.clone(),
             changed: false,
             warnings: Vec::new(),
+            error: None,
             program: Program::default(),
             proc_funcs: HashMap::new(),
             target: 0,
             proc: None,
             nesting: 0,
-            warp: false,
+            visiting: HashSet::new(),
         }
+    }
+
+    /// Records a malformed script. The first one wins.
+    fn fail(&mut self, error: Error) {
+        if self.error.is_none() {
+            self.error = Some(error);
+        }
+    }
+
+    /// Marks a block as being lowered, or records a cycle when it already is.
+    fn enter(&mut self, id: &str) -> bool {
+        if !self.visiting.insert(id.to_owned()) {
+            self.fail(Error::Cycle { target: self.targets[self.target].name.clone(), block: id.to_owned() });
+            return false;
+        }
+        true
+    }
+
+    fn leave(&mut self, id: &str) {
+        self.visiting.remove(id);
     }
 
     fn lower_all(&mut self) -> Program {
@@ -229,6 +269,11 @@ impl<'a> Lowerer<'a> {
     fn lower_target(&mut self, ti: usize) -> Target {
         let target = self.targets[ti];
         self.target = ti;
+        for v in target.variable_list() {
+            if v.cloud {
+                self.warn(&v.id, format!("cloud variable {:?} is a plain variable here; nothing syncs it", v.name));
+            }
+        }
         let mut scripts = Vec::new();
         for (id, block) in target.all_blocks() {
             if !block.top_level || block.shadow {
@@ -275,7 +320,6 @@ impl<'a> Lowerer<'a> {
     fn lower_script(&mut self, hat: &Block, name: String) -> FuncId {
         self.proc = None;
         self.nesting = 0;
-        self.warp = false;
         let body = self.lower_stack(hat.next.as_deref());
         self.program.add_function(Function { name, params: Vec::new(), warp: false, body })
     }
@@ -285,7 +329,6 @@ impl<'a> Lowerer<'a> {
         let proc = self.types.procs[ti][pi].clone();
         self.proc = Some(pi);
         self.nesting = 0;
-        self.warp = proc.warp;
         let definition = self.targets[ti].block(&proc.definition);
         let body = self.lower_stack(definition.as_ref().and_then(|b| b.next.as_deref()));
         let params = proc
@@ -316,11 +359,19 @@ impl<'a> Lowerer<'a> {
 
     fn lower_stack(&mut self, first: Option<&str>) -> Vec<Stmt> {
         let mut stmts = Vec::new();
+        let mut chain = Vec::new();
         let mut next = first.map(str::to_owned);
         while let Some(id) = next {
             let Some(block) = self.block(&id) else { break };
+            if self.error.is_some() || !self.enter(&id) {
+                break;
+            }
+            chain.push(id.clone());
             self.lower_block(&id, &block, &mut stmts);
             next = block.next.clone();
+        }
+        for id in chain {
+            self.leave(&id);
         }
         stmts
     }
@@ -336,13 +387,12 @@ impl<'a> Lowerer<'a> {
         body
     }
 
-    /// The body of a loop: the substack and then the yield at the end of each iteration, which a
-    /// warp procedure skips.
+    /// The body of a loop: the substack and then the yield at the end of each iteration. The yield
+    /// is there in warp procedures too; the runtime decides what it does, since a procedure called
+    /// from a warp procedure inherits warp mode.
     fn loop_body(&mut self, block: &Block) -> Vec<Stmt> {
         let mut body = self.substack(block, "SUBSTACK");
-        if !self.warp {
-            body.push(Stmt::Yield);
-        }
+        body.push(Stmt::Yield);
         body
     }
 
@@ -394,10 +444,7 @@ impl<'a> Lowerer<'a> {
             }
             "control_wait_until" => {
                 let cond = self.input(block, "CONDITION", Type::Bool);
-                let mut body = vec![Stmt::If { cond, then: vec![Stmt::Break], els: Vec::new() }];
-                if !self.warp {
-                    body.push(Stmt::Yield);
-                }
+                let body = vec![Stmt::If { cond, then: vec![Stmt::Break], els: Vec::new() }, Stmt::Yield];
                 out.push(Stmt::Loop(body));
             }
             "control_stop" => match field_value(block, "STOP_OPTION").unwrap_or_default().as_str() {
@@ -421,7 +468,7 @@ impl<'a> Lowerer<'a> {
             "data_changevariableby" => {
                 let var = self.variable(block);
                 let delta = self.input(block, "VALUE", Type::Num);
-                let current = self.cast(Expr::Var(var), Type::Num);
+                let current = self.cast_to_number(Expr::Var(var));
                 out.push(Stmt::Set(var, Expr::Binary(BinOp::Add, Box::new(current), Box::new(delta))));
             }
             "procedures_call" => self.lower_call(id, block, out),
@@ -529,15 +576,32 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// `Cast.toNumber`: converts to a number, and turns a NaN that an earlier operation produced
+    /// into 0, as every numeric block input does in Scratch.
+    fn cast_to_number(&mut self, e: Expr) -> Expr {
+        if self.ty(&e) != Type::Num {
+            // The other conversions never give NaN.
+            return self.cast(e, Type::Num);
+        }
+        match e {
+            Expr::Num(n) => Expr::Num(thatch_values::num_to_number(n)),
+            e if may_be_nan(&e) => Expr::Unary(UnOp::ToNumber, Box::new(e)),
+            e => e,
+        }
+    }
+
     /// Lowers an input and converts it to `want`.
     fn input(&mut self, block: &Block, name: &str, want: Type) -> Expr {
         let e = self.input_raw(block, name, want);
-        self.cast(e, want)
+        if want == Type::Num { self.cast_to_number(e) } else { self.cast(e, want) }
     }
 
     /// Lowers an input, keeping its own type. An empty slot gives the empty value of `default`.
     fn input_raw(&mut self, block: &Block, name: &str, default: Type) -> Expr {
         let raw = block.inputs.get(name).cloned().unwrap_or(serde_json::Value::Null);
+        if !raw.is_null() && !raw.is_array() {
+            self.warn(name, format!("input {name} is not an input array; it counts as empty"));
+        }
         match parse_input(&raw) {
             Input::Empty => match default {
                 Type::Bool => Expr::Bool(false),
@@ -575,8 +639,18 @@ impl<'a> Lowerer<'a> {
             {
                 return self.primitive(&p);
             }
+            self.warn(id, "an input refers to a block that does not exist; it reports 0".to_owned());
             return Expr::Num(0.0);
         };
+        if self.error.is_some() || !self.enter(id) {
+            return Expr::Num(0.0);
+        }
+        let e = self.reporter_block(id, block);
+        self.leave(id);
+        e
+    }
+
+    fn reporter_block(&mut self, id: &str, block: Block) -> Expr {
         let num = |this: &mut Self, name: &str| this.input(&block, name, Type::Num);
         match block.opcode.as_str() {
             "operator_add" | "operator_subtract" | "operator_multiply" | "operator_divide" | "operator_mod" => {
@@ -723,6 +797,20 @@ impl<'a> Lowerer<'a> {
         self.changed = true;
         let v = vars.last().expect("just pushed");
         var_ref(false, v)
+    }
+}
+
+/// Whether a numeric expression can evaluate to NaN. Conversions from other types never do, and
+/// neither do lengths, the timer or a rounding of something that cannot; arithmetic, variables and
+/// parameters can.
+fn may_be_nan(e: &Expr) -> bool {
+    match e {
+        Expr::Num(n) => n.is_nan(),
+        Expr::Cast(Type::Num, _) => false,
+        Expr::Unary(UnOp::ToNumber, _) => false,
+        Expr::Unary(UnOp::Round | UnOp::Abs | UnOp::Floor | UnOp::Ceil, inner) => may_be_nan(inner),
+        Expr::Rt(RtExpr::Length | RtExpr::Timer, _) => false,
+        _ => true,
     }
 }
 

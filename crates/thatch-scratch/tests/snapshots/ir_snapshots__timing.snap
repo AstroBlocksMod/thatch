@@ -1,0 +1,48 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = "side script after a quarter second"
+str 1 = "waiting"
+str 2 = "0.5"
+str 3 = "done waiting"
+str 4 = "the loop kept ticking"
+str 5 = "0.2"
+str 6 = "timer passed 0.2"
+str 7 = "0.1"
+str 8 = "stopping everything"
+target "Stage" (stage)
+  num 0 "ticks" = 0
+target "Cat"
+  script FlagClicked -> fn 0
+  script FlagClicked -> fn 1
+  script FlagClicked -> fn 2
+fn 0 "Cat/flag flagLoop"()
+  loop
+    set StageNum(0) = Add(ToNumber(StageNum(0)), 1)
+    Wait(0)
+    yield
+fn 1 "Cat/flag flagSide"()
+  Wait(0.25)
+  Say((any)str 0)
+fn 2 "Cat/flag flagMain"()
+  SayFor((any)str 1, 0.5)
+  Say((any)str 3)
+  loop
+    if Gt(StageNum(0), 5)
+      break
+    yield
+  Say((any)str 4)
+  ResetTimer()
+  loop
+    if Gt(Timer(), str 5)
+      break
+    yield
+  Say((any)str 6)
+  loop
+    if Gt(StageNum(0), 40)
+      break
+    Wait(0.1)
+    yield
+  Say((any)str 8)
+  StopAll()

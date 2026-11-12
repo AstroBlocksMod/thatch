@@ -1,0 +1,81 @@
+{
+  "targets": [
+    {
+      "isStage": true,
+      "name": "Stage",
+      "variables": {},
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {},
+      "currentCostume": 0,
+      "costumes": [{ "name": "backdrop1", "assetId": "cd21514d0531fdffb22204e0ec5ed84a", "md5ext": "cd21514d0531fdffb22204e0ec5ed84a.svg", "dataFormat": "svg", "rotationCenterX": 240, "rotationCenterY": 180 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 0,
+      "tempo": 60,
+      "videoTransparency": 50,
+      "videoState": "off"
+    },
+    {
+      "isStage": false,
+      "name": "Cat",
+      "variables": { "v_v": ["v", 0], "v_i": ["i", 0] },
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {
+        "flag": { "opcode": "event_whenflagclicked", "next": "sayNanPlus", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 0 },
+
+        "sayNanPlus": { "opcode": "looks_say", "next": "sayNan", "parent": "flag", "inputs": { "MESSAGE": [3, "nanPlus", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "nanPlus": { "opcode": "operator_add", "next": null, "parent": "sayNanPlus", "inputs": { "NUM1": [3, "nan1", [4, ""]], "NUM2": [1, [4, "1"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "nan1": { "opcode": "operator_divide", "next": null, "parent": "nanPlus", "inputs": { "NUM1": [1, [4, "0"]], "NUM2": [1, [4, "0"]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "sayNan": { "opcode": "looks_say", "next": "sayLetterHalf", "parent": "sayNanPlus", "inputs": { "MESSAGE": [3, "nan2", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "nan2": { "opcode": "operator_divide", "next": null, "parent": "sayNan", "inputs": { "NUM1": [1, [4, "0"]], "NUM2": [1, [4, "0"]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "sayLetterHalf": { "opcode": "looks_say", "next": "sayLetterNan", "parent": "sayNan", "inputs": { "MESSAGE": [3, "openHalf", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "openHalf": { "opcode": "operator_join", "next": null, "parent": "sayLetterHalf", "inputs": { "STRING1": [1, [10, "["]], "STRING2": [3, "closeHalf", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "closeHalf": { "opcode": "operator_join", "next": null, "parent": "openHalf", "inputs": { "STRING1": [3, "letterHalf", [10, ""]], "STRING2": [1, [10, "]"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "letterHalf": { "opcode": "operator_letter_of", "next": null, "parent": "closeHalf", "inputs": { "LETTER": [1, [6, "3.5"]], "STRING": [1, [10, "abc"]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "sayLetterNan": { "opcode": "looks_say", "next": "setNan", "parent": "sayLetterHalf", "inputs": { "MESSAGE": [3, "openNan", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "openNan": { "opcode": "operator_join", "next": null, "parent": "sayLetterNan", "inputs": { "STRING1": [1, [10, "["]], "STRING2": [3, "closeNan", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "closeNan": { "opcode": "operator_join", "next": null, "parent": "openNan", "inputs": { "STRING1": [3, "letterNan", [10, ""]], "STRING2": [1, [10, "]"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "letterNan": { "opcode": "operator_letter_of", "next": null, "parent": "closeNan", "inputs": { "LETTER": [3, "nan3", [6, ""]], "STRING": [1, [10, "abc"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "nan3": { "opcode": "operator_divide", "next": null, "parent": "letterNan", "inputs": { "NUM1": [1, [4, "0"]], "NUM2": [1, [4, "0"]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "setNan": { "opcode": "data_setvariableto", "next": "chgNan", "parent": "sayLetterNan", "inputs": { "VALUE": [3, "nan4", [10, ""]] }, "fields": { "VARIABLE": ["v", "v_v"] }, "shadow": false, "topLevel": false },
+        "nan4": { "opcode": "operator_divide", "next": null, "parent": "setNan", "inputs": { "NUM1": [1, [4, "0"]], "NUM2": [1, [4, "0"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "chgNan": { "opcode": "data_changevariableby", "next": "sayV", "parent": "setNan", "inputs": { "VALUE": [1, [4, "1"]] }, "fields": { "VARIABLE": ["v", "v_v"] }, "shadow": false, "topLevel": false },
+        "sayV": { "opcode": "looks_say", "next": "sayHex", "parent": "chgNan", "inputs": { "MESSAGE": [3, [12, "v", "v_v"], [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "sayHex": { "opcode": "looks_say", "next": "sayTiny", "parent": "sayV", "inputs": { "MESSAGE": [3, "hexPlus", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "hexPlus": { "opcode": "operator_add", "next": null, "parent": "sayHex", "inputs": { "NUM1": [1, [4, "0x200000000000011"]], "NUM2": [1, [4, "0"]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "sayTiny": { "opcode": "looks_say", "next": "sayTinyNum", "parent": "sayHex", "inputs": { "MESSAGE": [1, [10, "1e-7"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayTinyNum": { "opcode": "looks_say", "next": "setI", "parent": "sayTiny", "inputs": { "MESSAGE": [3, "tinyPlus", [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "tinyPlus": { "opcode": "operator_add", "next": null, "parent": "sayTinyNum", "inputs": { "NUM1": [1, [4, "1e-7"]], "NUM2": [1, [4, "0"]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "setI": { "opcode": "data_setvariableto", "next": "whileI", "parent": "sayTinyNum", "inputs": { "VALUE": [1, [10, "0"]] }, "fields": { "VARIABLE": ["i", "v_i"] }, "shadow": false, "topLevel": false },
+        "whileI": { "opcode": "control_while", "next": "sayI", "parent": "setI", "inputs": { "CONDITION": [2, "iLt3"], "SUBSTACK": [2, "chgI"] }, "fields": {}, "shadow": false, "topLevel": false },
+        "iLt3": { "opcode": "operator_lt", "next": null, "parent": "whileI", "inputs": { "OPERAND1": [3, [12, "i", "v_i"], [10, ""]], "OPERAND2": [1, [10, "3"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "chgI": { "opcode": "data_changevariableby", "next": null, "parent": "whileI", "inputs": { "VALUE": [1, [4, "1"]] }, "fields": { "VARIABLE": ["i", "v_i"] }, "shadow": false, "topLevel": false },
+        "sayI": { "opcode": "looks_say", "next": null, "parent": "whileI", "inputs": { "MESSAGE": [3, [12, "i", "v_i"], [10, ""]] }, "fields": {}, "shadow": false, "topLevel": false }
+      },
+      "currentCostume": 0,
+      "costumes": [{ "name": "costume1", "assetId": "bcf454acf82e4504149f7ffe07081dbc", "md5ext": "bcf454acf82e4504149f7ffe07081dbc.svg", "dataFormat": "svg", "rotationCenterX": 48, "rotationCenterY": 50 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 1,
+      "visible": true,
+      "x": 0,
+      "y": 0,
+      "size": 100,
+      "direction": 90,
+      "draggable": false,
+      "rotationStyle": "all around"
+    }
+  ],
+  "monitors": [],
+  "extensions": [],
+  "meta": { "semver": "3.0.0", "vm": "0.2.0", "agent": "" }
+}

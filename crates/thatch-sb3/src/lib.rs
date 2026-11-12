@@ -5,7 +5,7 @@
 //! [`Input`] offering a parsed view. Assets are listed by their file names, not loaded.
 
 use std::collections::BTreeMap;
-use std::io::Read;
+use std::io::{BufRead, Read};
 use std::path::Path;
 
 use serde::Deserialize;
@@ -29,6 +29,15 @@ pub enum Error {
     NoProjectJson { path: String },
     #[error("project.json is not valid: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("{target}: block {block} is malformed: {source}")]
+    Block {
+        target: String,
+        block: String,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("{path}: project.json is larger than the {limit} byte limit")]
+    TooLarge { path: String, limit: u64 },
 }
 
 /// A Scratch 3 project.
@@ -239,8 +248,20 @@ pub fn json_to_text(v: &Value) -> String {
     }
 }
 
+/// A variable of a target.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Variable {
+    pub id: String,
+    pub name: String,
+    /// The initial value: a number or a string, as the file has it.
+    pub value: Value,
+    /// A cloud variable, marked by a third `true` element in the file.
+    pub cloud: bool,
+}
+
 impl Target {
     /// The block with the given id, or None when the id is a top-level primitive or unknown.
+    /// [`Project::from_json`] has checked every block, so a block that exists always parses.
     pub fn block(&self, id: &str) -> Option<Block> {
         let raw = self.blocks.get(id)?;
         if raw.is_array() {
@@ -262,15 +283,16 @@ impl Target {
             .collect()
     }
 
-    /// Variables as (id, name, initial value), in file order.
-    pub fn variable_list(&self) -> Vec<(String, String, Value)> {
+    /// The variables in file order.
+    pub fn variable_list(&self) -> Vec<Variable> {
         self.variables
             .iter()
             .filter_map(|(id, raw)| {
                 let parts = raw.as_array()?;
                 let name = parts.first().map(json_to_text)?;
                 let value = parts.get(1).cloned().unwrap_or(Value::Number(0.into()));
-                Some((id.clone(), name, value))
+                let cloud = parts.get(2).and_then(Value::as_bool).unwrap_or(false);
+                Some(Variable { id: id.clone(), name, value, cloud })
             })
             .collect()
     }
@@ -281,33 +303,65 @@ impl Target {
     }
 }
 
+/// The most a `project.json` may be, inside an archive or on its own. Real projects stay far below;
+/// the limit keeps a corrupt or hostile file from exhausting memory.
+pub const MAX_PROJECT_JSON: u64 = 256 << 20;
+
 impl Project {
-    /// Parses a `project.json`.
+    /// Parses a `project.json` and checks that every block in it is well formed, so that the rest
+    /// of the compiler can rely on [`Target::block`].
     pub fn from_json(json: &str) -> Result<Self, Error> {
-        Ok(serde_json::from_str(json)?)
+        let project: Self = serde_json::from_str(json)?;
+        for target in &project.targets {
+            for (id, raw) in &target.blocks {
+                if raw.is_array() {
+                    continue;
+                }
+                if let Err(source) = serde_json::from_value::<Block>(raw.clone()) {
+                    return Err(Error::Block { target: target.name.clone(), block: id.clone(), source });
+                }
+            }
+        }
+        Ok(project)
     }
 
-    /// Reads an `.sb3` archive or a bare `project.json` file.
+    /// Reads an `.sb3` archive or a bare `project.json` file. A JSON file may start with
+    /// whitespace or a byte order mark.
     pub fn read(path: &Path) -> Result<Self, Error> {
         let display = path.display().to_string();
         let io = |source| Error::Io { path: display.clone(), source };
-        let bytes = std::fs::read(path).map_err(io)?;
-        if bytes.first() == Some(&b'{') {
-            let text = String::from_utf8_lossy(&bytes);
-            return Self::from_json(&text);
+        let file = std::fs::File::open(path).map_err(io)?;
+        let mut reader = std::io::BufReader::new(file);
+        let head = reader.fill_buf().map_err(io)?;
+        let json_start = head.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(head);
+        let is_json = json_start.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{');
+        if is_json {
+            let text = read_limited(&mut reader, &display)?;
+            return Self::from_json(text.trim_start_matches('\u{FEFF}'));
         }
-        let cursor = std::io::Cursor::new(bytes);
         let mut archive =
-            zip::ZipArchive::new(cursor).map_err(|source| Error::Zip { path: display.clone(), source })?;
-        let mut file = archive.by_name("project.json").map_err(|_| Error::NoProjectJson { path: display.clone() })?;
-        let mut text = String::new();
-        file.read_to_string(&mut text).map_err(io)?;
+            zip::ZipArchive::new(reader).map_err(|source| Error::Zip { path: display.clone(), source })?;
+        let mut entry = archive.by_name("project.json").map_err(|_| Error::NoProjectJson { path: display.clone() })?;
+        let text = read_limited(&mut entry, &display)?;
         Self::from_json(&text)
     }
 
     pub fn stage(&self) -> Option<&Target> {
         self.targets.iter().find(|t| t.is_stage)
     }
+}
+
+/// Reads at most [`MAX_PROJECT_JSON`] bytes of UTF-8.
+fn read_limited(reader: &mut impl Read, path: &str) -> Result<String, Error> {
+    let mut text = String::new();
+    reader
+        .take(MAX_PROJECT_JSON + 1)
+        .read_to_string(&mut text)
+        .map_err(|source| Error::Io { path: path.to_owned(), source })?;
+    if text.len() as u64 > MAX_PROJECT_JSON {
+        return Err(Error::TooLarge { path: path.to_owned(), limit: MAX_PROJECT_JSON });
+    }
+    Ok(text)
 }
 
 #[cfg(test)]
@@ -332,6 +386,25 @@ mod tests {
         assert_eq!(field_id(&block, "OP"), None);
         assert!(stage.block("p").is_none());
         assert_eq!(stage.all_blocks().len(), 1);
-        assert_eq!(stage.variable_list()[0].1, "score");
+        assert_eq!(stage.variable_list()[0].name, "score");
+        assert!(!stage.variable_list()[0].cloud);
+    }
+
+    #[test]
+    fn malformed_blocks_are_reported() {
+        let json = r#"{"targets":[{"isStage":true,"name":"Stage","blocks":{"a":{"next":null}}}]}"#;
+        let err = Project::from_json(json).unwrap_err();
+        assert!(matches!(err, Error::Block { ref block, .. } if block == "a"), "{err}");
+    }
+
+    #[test]
+    fn json_files_may_start_with_whitespace_or_a_bom() {
+        let dir = std::env::temp_dir().join(format!("thatch-sb3-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("project.json");
+        std::fs::write(&path, "\u{FEFF}\n  {\"targets\":[{\"isStage\":true,\"name\":\"Stage\"}]}").unwrap();
+        let project = Project::read(&path).unwrap();
+        assert_eq!(project.targets[0].name, "Stage");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

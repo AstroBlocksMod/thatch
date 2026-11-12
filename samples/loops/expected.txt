@@ -1,4 +1,4 @@
-Cat says: sum 15000250005
+Cat says: sum 600009999
 Cat says: other script sees i = 1
 Cat says: other script sees i = 2
 Cat says: other script sees i = 3

@@ -19,7 +19,7 @@ A compiler that cannot draw runs no real project, and the engine-agnostic ABI is
 
 - [ ] Sprite state in the runtime (position, direction, size, costume, visibility, effects, layer) and the motion and looks blocks lowered against it, testable headless through the sensing reporters
 - [ ] A host table in the ABI: draw, play, read input, so a host only implements those
-- [ ] The first headed host: ScratchEverywhere through the C ABI, or a minimal window if that is quicker to stand up
+- [ ] The first headed host: Scratch Everywhere! through the C ABI, or a minimal window if that is quicker to stand up
 - [ ] Pen
 - [ ] Key, mouse and click hats, and the sensing blocks that need a stage
 - [ ] Sound

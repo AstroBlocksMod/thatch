@@ -49,12 +49,23 @@ impl From<cranelift_module::ModuleError> for Error {
 pub struct JitProgram {
     module: Option<JITModule>,
     init: *const u8,
+    abi_version: *const u8,
 }
 
 impl JitProgram {
     /// The address of the program's `thatch_program_init`.
     pub fn init_address(&self) -> *const u8 {
         self.init
+    }
+
+    /// The ABI version the program reports through its `thatch_program_abi_version`, which a host
+    /// checks before calling the init function.
+    pub fn abi_version(&self) -> u32 {
+        // SAFETY: the address is the exported function the compiler just produced, with this
+        // signature.
+        let f = unsafe { std::mem::transmute::<*const u8, unsafe extern "C" fn() -> i32>(self.abi_version) };
+        // SAFETY: as above; the function only returns a constant.
+        unsafe { f() as u32 }
     }
 }
 
@@ -85,10 +96,11 @@ pub fn compile_jit(program: &Program, symbols: &[(&str, *const u8)]) -> Result<J
     let mut builder = JITBuilder::with_isa(isa, default_libcall_names());
     builder.symbols(symbols.iter().map(|(name, ptr)| (*name, *ptr)));
     let mut module = JITModule::new(builder);
-    let init = Compiler::new(&mut module, program).compile(false)?;
+    let (init, version) = Compiler::new(&mut module, program).compile(false)?;
     module.finalize_definitions()?;
     let init = module.get_finalized_function(init);
-    Ok(JitProgram { module: Some(module), init })
+    let abi_version = module.get_finalized_function(version);
+    Ok(JitProgram { module: Some(module), init, abi_version })
 }
 
 /// Compiles the program into an object file with a `main`, ready to link against the runtime.
@@ -131,8 +143,9 @@ impl<'a, M: Module> Compiler<'a, M> {
         Self { module, program, rt: HashMap::new(), funcs: Vec::new(), data: HashMap::new() }
     }
 
-    /// Compiles everything and returns the id of `thatch_program_init`.
-    fn compile(&mut self, with_main: bool) -> Result<CFuncId, Error> {
+    /// Compiles everything and returns the ids of `thatch_program_init` and
+    /// `thatch_program_abi_version`.
+    fn compile(&mut self, with_main: bool) -> Result<(CFuncId, CFuncId), Error> {
         for f in thatch_abi::RT_FNS {
             let mut sig = self.module.make_signature();
             for p in f.params {
@@ -153,10 +166,11 @@ impl<'a, M: Module> Compiler<'a, M> {
             self.compile_function(i, f)?;
         }
         let init = self.compile_init()?;
+        let version = self.compile_abi_version()?;
         if with_main {
             self.compile_main(init)?;
         }
-        Ok(init)
+        Ok((init, version))
     }
 
     fn function_signature(&self, f: &thatch_ir::Function) -> Signature {
@@ -320,6 +334,27 @@ impl<'a, M: Module> Compiler<'a, M> {
         Ok(id)
     }
 
+    /// `thatch_program_abi_version()`: the ABI version the program was compiled against.
+    fn compile_abi_version(&mut self) -> Result<CFuncId, Error> {
+        let mut sig = self.module.make_signature();
+        sig.returns.push(AbiParam::new(types::I32));
+        let id = self.module.declare_function(thatch_abi::PROGRAM_ABI_VERSION, Linkage::Export, &sig)?;
+        let mut ctx = self.module.make_context();
+        ctx.func.signature = sig;
+        let mut fb_ctx = FunctionBuilderContext::new();
+        {
+            let mut b = FunctionBuilder::new(&mut ctx.func, &mut fb_ctx);
+            let entry = b.create_block();
+            b.switch_to_block(entry);
+            let version = b.ins().iconst(types::I32, i64::from(thatch_abi::ABI_VERSION));
+            b.ins().return_(&[version]);
+            b.seal_all_blocks();
+            b.finalize(self.module.isa().frontend_config());
+        }
+        self.define(id, thatch_abi::PROGRAM_ABI_VERSION, &mut ctx)?;
+        Ok(id)
+    }
+
     /// `main(argc, argv)`: hands the program to the headless host.
     fn compile_main(&mut self, init: CFuncId) -> Result<(), Error> {
         let mut sig = self.module.make_signature();
@@ -339,8 +374,9 @@ impl<'a, M: Module> Compiler<'a, M> {
             let argv = b.block_params(entry)[1];
             let init_ref = self.module.declare_func_in_func(init, b.func);
             let init_addr = b.ins().func_addr(types::I64, init_ref);
+            let version = b.ins().iconst(types::I32, i64::from(thatch_abi::ABI_VERSION));
             let main = self.module.declare_func_in_func(self.rt[thatch_abi::MAIN], b.func);
-            let call = b.ins().call(main, &[argc, argv, init_addr]);
+            let call = b.ins().call(main, &[argc, argv, init_addr, version]);
             let code = b.inst_results(call)[0];
             b.ins().return_(&[code]);
             b.seal_all_blocks();
@@ -363,7 +399,6 @@ struct FnGen<'a, 'b, M: Module> {
     ctx: CValue,
     params: Vec<CValue>,
     param_types: Vec<Type>,
-    warp: bool,
     rt: HashMap<&'static str, FuncRef>,
     callees: HashMap<u32, FuncRef>,
     /// Exit blocks of the enclosing loops.
@@ -386,7 +421,6 @@ impl<'a, 'b, M: Module> FnGen<'a, 'b, M> {
             ctx: values[0],
             params: values[1..].to_vec(),
             param_types: f.params.iter().map(|p| p.ty).collect(),
-            warp: f.warp,
             rt: HashMap::new(),
             callees: HashMap::new(),
             loops: Vec::new(),
@@ -550,6 +584,12 @@ impl<'a, 'b, M: Module> FnGen<'a, 'b, M> {
                 let v = self.expr(inner);
                 match op {
                     UnOp::Not => self.b.ins().bxor_imm_s(v, 1),
+                    UnOp::ToNumber => {
+                        // `Cast.toNumber`: NaN becomes 0.
+                        let nan = self.b.ins().fcmp(FloatCC::Unordered, v, v);
+                        let zero = self.b.ins().f64const(0.0);
+                        self.b.ins().select(nan, zero, v)
+                    }
                     UnOp::Round => self.rt_value(thatch_abi::ROUND, &[v]),
                     UnOp::Abs => self.b.ins().fabs(v),
                     UnOp::Floor => self.b.ins().floor(v),
@@ -807,10 +847,11 @@ impl<'a, 'b, M: Module> FnGen<'a, 'b, M> {
                 self.switch(dead);
             }
             Stmt::Yield => {
-                if !self.warp {
-                    self.call_rt(thatch_abi::YIELD, &[self.ctx]);
-                    self.check_killed();
-                }
+                // Always a call, even in a warp function: the runtime returns at once in warp
+                // mode until the 500 ms limit, and only it knows whether the thread is in warp
+                // mode, since a block called from a warp block inherits it.
+                self.call_rt(thatch_abi::YIELD, &[self.ctx]);
+                self.check_killed();
             }
             Stmt::Call { func, args, nesting } => self.call(*func, args, *nesting),
             Stmt::Rt(f, args) => self.rt_stmt(*f, args),
@@ -824,7 +865,15 @@ impl<'a, 'b, M: Module> FnGen<'a, 'b, M> {
         let param_types: Vec<Type> = callee.params.iter().map(|p| p.ty).collect();
         let mut values = vec![self.ctx];
         for (arg, ty) in args.iter().zip(param_types) {
-            let v = self.typed(arg, ty);
+            let mut v = self.typed(arg, ty);
+            if ty == Type::Any && matches!(arg, Expr::Var(VarRef::TargetAny(_) | VarRef::StageAny(_))) {
+                // The callee gets the value as it is now, not the variable, which the callee or
+                // another thread may change before the parameter is read.
+                let slot = self.value_slot();
+                self.call_rt(thatch_abi::ANY_SNAPSHOT, &[self.ctx, slot, v]);
+                self.temps = true;
+                v = slot;
+            }
             values.push(v);
         }
         let id = self.b.ins().iconst(types::I64, i64::from(func.0));

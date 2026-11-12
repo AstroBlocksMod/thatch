@@ -14,7 +14,7 @@ What it does not do yet: anything that needs a stage (motion, looks, pen, sound,
 
 Thatch is built to grow in three directions without starting over:
 
-- **Engine-agnostic.** Compiled programs talk to the outside world only through a small, versioned [C ABI](abi.md). The headless host is the first implementation; a host that renders through ScratchEverywhere, another engine, or a plain window implements the same functions.
+- **Engine-agnostic.** Compiled programs talk to the outside world only through a small, versioned [C ABI](abi.md). The headless host is the first implementation; a host that renders through Scratch Everywhere!, another engine, or a plain window implements the same functions.
 - **Backend-agnostic.** The [IR](ir.md) knows nothing about Scratch or about Cranelift. Cranelift comes first because it compiles fast; an LLVM backend can take the same IR when the last few percent of speed matter more than compile time.
 - **A Scratch superset, and then Snap!.** Once vanilla projects run exactly, the plan is real functions with return values, static types, compile-time macros and FFI into the host, and then a Snap! frontend with closures and nested lists, lowering to the same IR.
 

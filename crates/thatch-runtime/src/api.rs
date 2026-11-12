@@ -37,6 +37,7 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
         thatch_any_to_num,
         thatch_any_to_str,
         thatch_any_to_bool,
+        thatch_any_snapshot,
         thatch_var_set,
         thatch_var_set_num,
         thatch_var_set_str,
@@ -152,11 +153,11 @@ pub unsafe extern "C" fn thatch_add_script(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn thatch_main(argc: i32, argv: *const *const c_char, init: i64) -> i32 {
+pub unsafe extern "C" fn thatch_main(argc: i32, argv: *const *const c_char, init: i64, abi_version: i32) -> i32 {
     // SAFETY: the program's `main` passes its own arguments and init function.
     unsafe {
         let init = std::mem::transmute::<usize, crate::InitFn>(init as usize);
-        crate::host::main(argc, argv, init)
+        crate::host::main(argc, argv, init, abi_version as u32)
     }
 }
 
@@ -248,6 +249,21 @@ pub unsafe extern "C" fn thatch_any_to_str(ctx: *mut ThreadCtx, p: *const Value)
             return h;
         }
         temp(inner(ctx), thatch_values::to_string(value_arg(p)))
+    }
+}
+
+/// Copies `*src` into `*dst`, a slot on the caller's stack. A string is kept alive in the thread's
+/// temporaries, which a custom block call protects until it returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_any_snapshot(ctx: *mut ThreadCtx, dst: *mut Value, src: *const Value) {
+    // SAFETY: generated code passes its own context, a writable stack slot and a live value.
+    unsafe {
+        let v = *src;
+        if v.tag == thatch_abi::TAG_STR {
+            let rc = strings::retain(v.bits as Handle);
+            inner(ctx).temps.push(rc);
+        }
+        *dst = v;
     }
 }
 

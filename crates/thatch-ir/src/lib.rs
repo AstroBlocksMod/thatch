@@ -63,6 +63,9 @@ pub enum BinOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnOp {
     Not,
+    /// `Cast.toNumber` on a number: NaN becomes 0. The frontend applies it wherever a block
+    /// consumes a numeric input, since `0 / 0` is NaN but `(0 / 0) + 1` is 1 in Scratch.
+    ToNumber,
     /// `Math.round`.
     Round,
     Abs,

@@ -6,6 +6,14 @@
 //! and less than 75 percent of the frame time has gone by. The clock that `wait` and `timer` read is
 //! virtual, one thirtieth of a second per frame, so runs are repeatable; only the frame budget is
 //! real time.
+//!
+//! # Aliasing
+//!
+//! While a thread runs, the runtime functions it calls reach the `Runtime` through the raw pointer
+//! every thread holds and borrow it mutably for the length of the call. So nothing may hold a
+//! reference to the `Runtime` across a coroutine resume: the runtime lives behind a raw pointer
+//! from [`Runtime::create`] to [`Runtime::destroy`], and the functions that resume threads
+//! ([`Runtime::frame`], [`Runtime::shutdown`]) take that pointer and borrow only between resumes.
 
 use std::ffi::c_void;
 use std::io::Write;
@@ -42,16 +50,15 @@ pub struct Target {
 }
 
 pub struct Runtime {
+    /// The pointer this runtime lives behind, which threads use to reach it.
+    this: *mut Runtime,
     pub targets: Vec<Box<Target>>,
     consts: Vec<Rc<String>>,
     const_ptrs: Vec<Handle>,
     pub threads: Vec<Thread>,
-    /// Threads replaced by a restart while suspended. They are resumed to finish at the end of the
-    /// pass.
+    /// Threads replaced by a restart. Suspended ones are resumed to finish at the end of the pass.
     dying: Vec<Thread>,
     next_thread_id: u64,
-    /// The id of the thread being stepped, or 0 between steps.
-    pub current: u64,
     pub redraw_requested: bool,
     pub frame: u64,
     timer_start_ms: f64,
@@ -62,15 +69,16 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub fn new(seed: u64) -> Self {
-        Self {
+    /// Allocates a runtime behind a raw pointer. Free it with [`Runtime::destroy`].
+    pub fn create(seed: u64) -> *mut Runtime {
+        let rt = Box::into_raw(Box::new(Self {
+            this: ptr::null_mut(),
             targets: Vec::new(),
             consts: Vec::new(),
             const_ptrs: Vec::new(),
             threads: Vec::new(),
             dying: Vec::new(),
             next_thread_id: 1,
-            current: 0,
             redraw_requested: false,
             frame: 0,
             timer_start_ms: 0.0,
@@ -78,7 +86,19 @@ impl Runtime {
             rng: seed | 1,
             headless: true,
             say_count: 0,
-        }
+        }));
+        // SAFETY: just allocated, and nothing else knows the pointer yet.
+        unsafe { (*rt).this = rt };
+        rt
+    }
+
+    /// Frees a runtime from [`Runtime::create`]. Call [`Runtime::shutdown`] first.
+    ///
+    /// # Safety
+    /// `rt` must come from `create`, and no thread may run or be suspended any more.
+    pub unsafe fn destroy(rt: *mut Runtime) {
+        // SAFETY: forwarded from the caller.
+        drop(unsafe { Box::from_raw(rt) });
     }
 
     // ---- registration -------------------------------------------------------------------------
@@ -179,12 +199,13 @@ impl Runtime {
             killed: 0,
             inner: ptr::null_mut(),
         };
-        Thread::new(ptr::addr_of_mut!(*self), id, target, script, func, ctx)
+        Thread::new(self.this, id, target, script, func, ctx)
     }
 
     /// Starts every script whose hat matches, as scratch-vm's `startHats` does: targets from front
-    /// to back with the stage last, scripts in file order, and a script already running for the same
-    /// target restarted in place. Returns the ids of the threads started.
+    /// to back with the stage last, scripts in file order. A thread of the same script and target
+    /// that is still in the thread list, even one that finished during this pass, is replaced in
+    /// place by the new one. Returns the ids of the threads started.
     pub fn start_hats(&mut self, hat: i64, arg: &str) -> Vec<u64> {
         let mut started = Vec::new();
         for target in (0..self.targets.len()).rev() {
@@ -202,11 +223,7 @@ impl Runtime {
                 }
                 let thread = self.new_thread(target, script);
                 started.push(thread.id);
-                match self
-                    .threads
-                    .iter()
-                    .position(|t| t.target == target && t.script == script && t.status != Status::Done)
-                {
+                match self.threads.iter().position(|t| t.target == target && t.script == script) {
                     Some(i) => {
                         let mut old = std::mem::replace(&mut self.threads[i], thread);
                         old.kill();
@@ -243,89 +260,130 @@ impl Runtime {
     // ---- scheduling ---------------------------------------------------------------------------
 
     /// Runs one frame.
-    pub fn frame(&mut self) -> Result<(), String> {
-        self.redraw_requested = false;
-        self.frame_started = Instant::now();
-        for t in &mut self.threads {
-            if t.status == Status::TickYield {
-                t.status = Status::Running;
+    ///
+    /// # Safety
+    /// `rt` must come from [`Runtime::create`], and the caller may hold no reference to it.
+    pub unsafe fn frame(rt: *mut Runtime) -> Result<(), String> {
+        {
+            // SAFETY: no thread runs here, and the caller holds no reference.
+            let r = unsafe { &mut *rt };
+            r.redraw_requested = false;
+            r.frame_started = Instant::now();
+            for t in &mut r.threads {
+                if t.status == Status::TickYield {
+                    t.status = Status::Running;
+                }
             }
         }
         loop {
             let mut active = 0;
             let mut stopped = false;
             let mut i = 0;
-            while i < self.threads.len() {
-                let t = &self.threads[i];
-                let skip = t.status == Status::Done || (t.status == Status::TickYield && !t.killed);
-                if !skip {
-                    self.step(i)?;
-                }
-                match self.threads[i].status {
+            // SAFETY: as above; each borrow ends before the next step resumes a thread.
+            while i < unsafe { (*rt).threads.len() } {
+                let (status, skip) = {
+                    // SAFETY: as above.
+                    let t = unsafe { &(&(*rt).threads)[i] };
+                    (t.status, t.status == Status::Done || (t.status == Status::TickYield && !t.killed))
+                };
+                // scratch-vm counts the thread it stepped, even when that thread replaced itself in
+                // the list by restarting its own script.
+                // SAFETY: forwarded from the caller.
+                let status = if skip { status } else { unsafe { Self::step(rt, i)? } };
+                match status {
                     Status::Running => active += 1,
                     Status::Done => stopped = true,
                     _ => {}
                 }
                 i += 1;
             }
-            if stopped {
-                self.threads.retain(|t| t.status != Status::Done);
-            }
-            self.finish_dying();
-            if active == 0 || self.redraw_requested || self.frame_started.elapsed() >= WORK_TIME {
+            // SAFETY: no thread runs here.
+            let done = unsafe {
+                let r = &mut *rt;
+                if stopped || r.threads.iter().any(|t| t.status == Status::Done) {
+                    r.threads.retain(|t| t.status != Status::Done);
+                }
+                active == 0 || r.redraw_requested || r.frame_started.elapsed() >= WORK_TIME
+            };
+            // SAFETY: forwarded from the caller.
+            unsafe { Self::finish_dying(rt) };
+            if done {
                 break;
             }
         }
-        self.frame += 1;
+        // SAFETY: no thread runs here.
+        unsafe { (*rt).frame += 1 };
         Ok(())
     }
 
-    /// Steps the thread at index `i` once.
-    fn step(&mut self, i: usize) -> Result<(), String> {
-        let id = self.threads[i].id;
-        if self.threads[i].status == Status::Fresh && self.threads[i].killed {
-            self.threads[i].status = Status::Done;
-            return Ok(());
-        }
-        let mut coroutine = self.threads[i].take_coroutine()?;
-        self.current = id;
+    /// Steps the thread at index `i` once and returns the status it stopped in.
+    ///
+    /// # Safety
+    /// As [`Runtime::frame`].
+    unsafe fn step(rt: *mut Runtime, i: usize) -> Result<Status, String> {
+        let (id, mut coroutine) = {
+            // SAFETY: no thread runs here.
+            let t = unsafe { &mut (&mut (*rt).threads)[i] };
+            if t.status == Status::Fresh && t.killed {
+                t.status = Status::Done;
+                return Ok(Status::Done);
+            }
+            (t.id, t.take_coroutine()?)
+        };
+        // No reference to the runtime is alive while the thread runs.
         let result = coroutine.resume(());
-        self.current = 0;
         let status = match result {
             CoroutineResult::Yield(Yield::Loop) => Status::Running,
             CoroutineResult::Yield(Yield::Tick) => Status::TickYield,
             CoroutineResult::Return(()) => Status::Done,
         };
+        // SAFETY: the thread has suspended or returned, so nothing else borrows the runtime.
+        let r = unsafe { &mut *rt };
         // The script may have restarted its own thread, which moved the old one to `dying`.
-        let slot = match self.threads.get_mut(i) {
+        let slot = match r.threads.get_mut(i) {
             Some(t) if t.id == id => Some(t),
-            _ => self.dying.iter_mut().find(|t| t.id == id),
+            _ => r.threads.iter_mut().chain(r.dying.iter_mut()).find(|t| t.id == id),
         };
         if let Some(t) = slot {
             t.put_coroutine(coroutine);
             t.status = status;
         }
-        Ok(())
+        Ok(status)
     }
 
     /// Lets killed, suspended threads return so they can be dropped.
-    fn finish_dying(&mut self) {
-        let dying = std::mem::take(&mut self.dying);
-        for mut t in dying {
-            t.finish();
+    ///
+    /// # Safety
+    /// As [`Runtime::frame`].
+    unsafe fn finish_dying(rt: *mut Runtime) {
+        loop {
+            // SAFETY: no thread runs here.
+            let dying = std::mem::take(unsafe { &mut (*rt).dying });
+            if dying.is_empty() {
+                return;
+            }
+            for mut t in dying {
+                t.finish();
+            }
         }
     }
 
     /// Stops everything and lets every thread finish, at the end of a run.
-    pub fn shutdown(&mut self) {
-        self.stop_all();
-        let threads = std::mem::take(&mut self.threads);
+    ///
+    /// # Safety
+    /// As [`Runtime::frame`].
+    pub unsafe fn shutdown(rt: *mut Runtime) {
+        let threads = {
+            // SAFETY: no thread runs here.
+            let r = unsafe { &mut *rt };
+            r.stop_all();
+            std::mem::take(&mut r.threads)
+        };
         for mut t in threads {
-            if t.suspended() {
-                t.finish();
-            }
+            t.finish();
         }
-        self.finish_dying();
+        // SAFETY: forwarded from the caller.
+        unsafe { Self::finish_dying(rt) };
     }
 
     /// Whether some thread could still run.
@@ -372,21 +430,41 @@ impl Drop for Runtime {
     }
 }
 
-/// Cuts a string to at most `max` UTF-16 code units, as scratch-vm cuts bubbles.
+/// Cuts a string to at most `max` UTF-16 code units, as scratch-vm's `substr(0, 330)` cuts bubbles.
+/// When the cut splits a character outside the Basic Multilingual Plane, JavaScript keeps the lone
+/// high surrogate, which shows as U+FFFD, so that is what is kept here.
 fn truncate_utf16(text: String, max: usize) -> String {
-    if text.encode_utf16().count() <= max {
+    if text.len() <= max || text.encode_utf16().count() <= max {
         return text;
     }
     let mut units = 0;
     let mut end = text.len();
+    let mut split = false;
     for (i, c) in text.char_indices() {
-        units += c.len_utf16();
-        if units > max {
+        if units + c.len_utf16() > max {
             end = i;
+            split = units < max;
             break;
         }
+        units += c.len_utf16();
     }
     let mut text = text;
     text.truncate(end);
+    if split {
+        text.push('\u{FFFD}');
+    }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_utf16;
+
+    #[test]
+    fn bubbles_are_cut_by_utf16_units() {
+        assert_eq!(truncate_utf16("abcd".into(), 3), "abc");
+        assert_eq!(truncate_utf16("ab😀".into(), 3), "ab\u{FFFD}");
+        assert_eq!(truncate_utf16("ab😀".into(), 4), "ab😀");
+        assert_eq!(truncate_utf16("a😀b".into(), 3), "a😀");
+    }
 }

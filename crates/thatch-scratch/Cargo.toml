@@ -12,5 +12,8 @@ thatch-sb3.workspace = true
 thatch-values.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+insta.workspace = true
+
 [lints]
 workspace = true

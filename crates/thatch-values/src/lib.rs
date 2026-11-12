@@ -103,18 +103,39 @@ fn count_digits(b: &[u8], i: &mut usize) -> usize {
     *i - start
 }
 
+/// A binary, octal or hex integer literal, rounded once to the nearest double (ties to even), as
+/// JavaScript does. Every digit of these radixes is a whole number of bits, so the literal is read
+/// as a bit string and only its top 53 bits plus a round and a sticky bit decide the result.
 fn parse_radix(digits: &str, radix: u32) -> f64 {
     if digits.is_empty() {
         return f64::NAN;
     }
-    let mut n = 0.0f64;
+    let bits_per_digit = radix.trailing_zeros();
+    let mut bits: Vec<bool> = Vec::with_capacity(digits.len() * bits_per_digit as usize);
     for c in digits.chars() {
-        match c.to_digit(radix) {
-            Some(d) => n = n * f64::from(radix) + f64::from(d),
-            None => return f64::NAN,
+        let Some(d) = c.to_digit(radix) else { return f64::NAN };
+        for b in (0..bits_per_digit).rev() {
+            bits.push((d >> b) & 1 == 1);
         }
     }
-    n
+    let first = match bits.iter().position(|b| *b) {
+        Some(i) => i,
+        None => return 0.0,
+    };
+    let bits = &bits[first..];
+    if bits.len() <= 53 {
+        return bits.iter().fold(0u64, |n, b| (n << 1) | u64::from(*b)) as f64;
+    }
+    let mut mantissa = bits[..53].iter().fold(0u64, |n, b| (n << 1) | u64::from(*b));
+    let round = bits[53];
+    let sticky = bits[54..].iter().any(|b| *b);
+    if round && (sticky || mantissa & 1 == 1) {
+        mantissa += 1;
+    }
+    let exponent = (bits.len() - 53) as i32;
+    // Exact: the mantissa fits in 54 bits and scaling by a power of two only moves the exponent,
+    // overflowing to infinity as JavaScript does.
+    mantissa as f64 * 2f64.powi(exponent)
 }
 
 /// `Cast.toNumber` for a string: `Number(s)`, with NaN becoming 0.
@@ -232,7 +253,9 @@ fn compare_utf16(a: &str, b: &str) -> Ordering {
 /// `Cast.isInt`: whether a value looks like an integer, as `pick random` decides it.
 pub fn is_int(v: ValueRef<'_>) -> bool {
     match v {
-        ValueRef::Num(n) => n.is_nan() || n == n.floor(),
+        // `n === parseInt(n, 10)`: parseInt reads `String(n)`, so a number written with an exponent
+        // (from 1e21 up) or an infinity is not an integer here.
+        ValueRef::Num(n) => n.is_nan() || (n.is_finite() && n == n.trunc() && n.abs() < 1e21),
         ValueRef::Bool(_) => true,
         ValueRef::Str(s) => !s.contains('.'),
     }
@@ -398,14 +421,15 @@ pub fn length(s: &str) -> f64 {
 }
 
 /// `letter (index) of (s)`: 1-based, empty when out of range.
+///
+/// As scratch-vm's `letterOf`: the index is cast to a number (NaN becomes 0) and made 0-based, the
+/// range check uses that fractional value, and `charAt` then truncates it.
 pub fn letter_of(index: f64, s: &str) -> String {
-    let len = length(s);
-    if index < 1.0 || index > len {
+    let i = num_to_number(index) - 1.0;
+    if i < 0.0 || i >= length(s) {
         return String::new();
     }
-    let i = index - 1.0;
-    let i = if i.is_nan() { 0 } else { i.trunc() as usize };
-    match s.encode_utf16().nth(i) {
+    match s.encode_utf16().nth(i.trunc() as usize) {
         Some(unit) => String::from_utf16_lossy(&[unit]),
         None => String::new(),
     }
@@ -427,8 +451,16 @@ pub fn is_number_like(s: &str) -> bool {
 /// block casts such a string and the number alike, with one exception: a say or think bubble
 /// formats numbers (see [`bubble_number`]) and shows strings as they are. So a number-like string is
 /// safe exactly when the bubble would show the same text for the number.
+///
+/// `pick random` is the other block that looks at the original value: `Cast.isInt` decides between
+/// a whole and a fractional result, and it judges the string `"1e-7"` whole (no decimal point) but
+/// the number 1e-7 not. So the two must agree on that too.
 pub fn is_safe_number_literal(s: &str) -> bool {
-    is_number_like(s) && bubble_number(js_number(s)) == s
+    if !is_number_like(s) {
+        return false;
+    }
+    let n = js_number(s);
+    bubble_number(n) == s && is_int(ValueRef::Str(s)) == is_int(ValueRef::Num(n))
 }
 
 #[cfg(test)]
@@ -545,7 +577,9 @@ mod tests {
         assert_eq!(letter_of(1.7, "abc"), "a");
         assert_eq!(letter_of(0.0, "abc"), "");
         assert_eq!(letter_of(4.0, "abc"), "");
-        assert_eq!(letter_of(f64::NAN, "abc"), "a");
+        assert_eq!(letter_of(3.5, "abc"), "c");
+        assert_eq!(letter_of(0.5, "abc"), "");
+        assert_eq!(letter_of(f64::NAN, "abc"), "");
         assert!(contains("Hello World", "WORLD"));
         assert!(!str_to_boolean("FALSE"));
         assert!(!str_to_boolean("0"));
@@ -569,6 +603,32 @@ mod tests {
         assert!(!is_safe_number_literal("-2.5"));
         assert!(!is_safe_number_literal("3.14159"));
         assert!(!is_safe_number_literal("abc"));
+        assert!(!is_safe_number_literal("1e-7"));
+        assert!(!is_safe_number_literal("1e+21"));
+        assert!(!is_safe_number_literal("Infinity"));
+    }
+
+    #[test]
+    fn is_int_follows_parse_int() {
+        assert!(is_int(ValueRef::Num(5.0)));
+        assert!(is_int(ValueRef::Num(-0.0)));
+        assert!(is_int(ValueRef::Num(f64::NAN)));
+        assert!(!is_int(ValueRef::Num(1e21)));
+        assert!(!is_int(ValueRef::Num(f64::INFINITY)));
+        assert!(!is_int(ValueRef::Num(0.5)));
+        assert!(is_int(ValueRef::Str("1e-7")));
+        assert!(!is_int(ValueRef::Str("1.0")));
+    }
+
+    #[test]
+    fn radix_literals_round_once() {
+        assert_eq!(js_number("0x200000000000011"), 144115188075855904.0);
+        assert_eq!(js_number("0x1fffffffffffff"), 9007199254740991.0);
+        assert_eq!(js_number("0x20000000000001"), 9007199254740992.0);
+        assert_eq!(js_number("0x20000000000003"), 9007199254740996.0);
+        assert_eq!(js_number("0x0"), 0.0);
+        assert_eq!(js_number("0o17"), 15.0);
+        assert_eq!(js_number(&format!("0x{}", "f".repeat(300))), f64::INFINITY);
     }
 
     #[test]

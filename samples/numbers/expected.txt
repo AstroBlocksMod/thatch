@@ -1,0 +1,9 @@
+Cat says: 1
+Cat says: NaN
+Cat says: [c]
+Cat says: []
+Cat says: 1
+Cat says: 144115188075855900
+Cat says: 1e-7
+Cat says: 1e-7
+Cat says: 3

@@ -164,6 +164,20 @@ impl Thread {
     }
 }
 
+impl Drop for Thread {
+    /// Dropping a suspended coroutine would unwind its stack through generated frames, which
+    /// cannot unwind. The scheduler finishes threads before it drops them; any thread that reaches
+    /// this point still suspended (after an error, say) leaks its stack instead.
+    fn drop(&mut self) {
+        if let Some(c) = self.coroutine.take()
+            && c.started()
+            && !c.done()
+        {
+            std::mem::forget(c);
+        }
+    }
+}
+
 impl ThreadInner {
     /// Suspends the thread. Returns once the scheduler resumes it; the caller then checks `killed`.
     pub fn suspend(&mut self, kind: Yield) {
@@ -203,14 +217,14 @@ impl ThreadInner {
         self.warp_depth = self.warp_depth.saturating_sub(1);
     }
 
-    /// scratch-vm's recursion rule: a call is recursive when a call to the same procedure is among
-    /// the five stack entries above it. Each enclosing loop or conditional is one entry, and so is
-    /// each call.
+    /// scratch-vm's recursion rule (`Thread.isRecursiveCall`): a call is recursive when a call to
+    /// the same procedure is among the six stack entries below it. Each enclosing loop or
+    /// conditional is one entry, and so is each call.
     pub fn is_recursive(&self, proc: i64, nesting: i64) -> bool {
         let mut distance = nesting;
         for frame in self.calls.iter().rev() {
             distance += 1;
-            if distance > 5 {
+            if distance > 6 {
                 return false;
             }
             if frame.proc == proc {

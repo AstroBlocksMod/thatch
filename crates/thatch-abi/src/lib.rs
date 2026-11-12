@@ -7,13 +7,15 @@
 //! Rust and ships as `libthatch_runtime.a`, but any implementation of these functions would do.
 //!
 //! Every change to a function here is a breaking change for compiled programs until [`ABI_VERSION`]
-//! is bumped with it.
+//! is bumped with it. A program also exports `thatch_program_abi_version`, which returns the
+//! version it was compiled against, and passes the same version to `thatch_main`; a host checks it
+//! before it calls `thatch_program_init`.
 
 #![no_std]
 
 use core::ffi::c_void;
 
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 /// A dynamically typed Scratch value: a number, a string handle or a boolean.
 #[repr(C)]
@@ -93,8 +95,8 @@ rt_fns! {
     ADD_NUM_VAR = "thatch_add_num_var"(I64, I64, I64, I64, F64);
     ADD_ANY_VAR = "thatch_add_any_var"(I64, I64, I64, I64, I64, I64);
     ADD_SCRIPT = "thatch_add_script"(I64, I64, I64, I64, I64, I64);
-    // The headless host's entry point: argc, argv, init function.
-    MAIN = "thatch_main"(I32, I64, I64) -> I32;
+    // The headless host's entry point: argc, argv, init function, ABI version of the program.
+    MAIN = "thatch_main"(I32, I64, I64, I32) -> I32;
 
     // Strings. Handles returned here belong to the thread until thatch_temps_clear.
     TEMPS_CLEAR = "thatch_temps_clear"(I64);
@@ -111,6 +113,9 @@ rt_fns! {
     ANY_TO_NUM = "thatch_any_to_num"(I64) -> F64;
     ANY_TO_STR = "thatch_any_to_str"(I64, I64) -> I64;
     ANY_TO_BOOL = "thatch_any_to_bool"(I64) -> I8;
+    // Copies a value into a slot the caller owns, keeping its string alive for the statement, so
+    // a custom block argument does not change when the variable it came from does.
+    ANY_SNAPSHOT = "thatch_any_snapshot"(I64, I64, I64);
     VAR_SET = "thatch_var_set"(I64, I64);
     VAR_SET_NUM = "thatch_var_set_num"(I64, F64);
     VAR_SET_STR = "thatch_var_set_str"(I64, I64);
@@ -142,6 +147,9 @@ rt_fns! {
 
 /// The symbol compiled programs export for the runtime to call.
 pub const PROGRAM_INIT: &str = "thatch_program_init";
+
+/// The symbol of `int32_t thatch_program_abi_version(void)`, which every compiled program exports.
+pub const PROGRAM_ABI_VERSION: &str = "thatch_program_abi_version";
 
 /// Finds a runtime function by name.
 pub fn rt_fn(name: &str) -> Option<&'static RtFn> {

@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+tempfile.workspace = true
 thatch-codegen.workspace = true
 thatch-ir.workspace = true
 thatch-runtime.workspace = true
