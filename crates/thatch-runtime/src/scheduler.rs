@@ -3,9 +3,13 @@
 //! A frame steps the threads in passes, as scratch-vm's sequencer does: a pass steps every thread
 //! that is not done and not waiting for the next frame, in list order, including threads started
 //! during the pass. Passes repeat while some stepped thread is still active, no redraw was requested
-//! and less than 75 percent of the frame time has gone by. The clock that `wait` and `timer` read is
-//! virtual, one thirtieth of a second per frame, so runs are repeatable; only the frame budget is
-//! real time.
+//! and less than 75 percent of the frame time has gone by. The clock that `wait` and `timer` read
+//! comes from the host; without one it is virtual, one thirtieth of a second per frame, so headless
+//! runs are repeatable. Only the frame budget is always real time.
+//!
+//! The runtime talks back to its host through the [`Host`] table it was created with: every bubble
+//! goes to `say`, and the clock to `now_ms`. The host drives the frame loop through the C API in
+//! `api.rs`.
 //!
 //! # Aliasing
 //!
@@ -16,13 +20,12 @@
 //! ([`Runtime::frame`], [`Runtime::shutdown`]) take that pointer and borrow only between resumes.
 
 use std::ffi::c_void;
-use std::io::Write;
 use std::ptr;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use corosensei::CoroutineResult;
-use thatch_abi::{HAT_BROADCAST, HAT_FLAG, TAG_STR, ThreadCtx, Value};
+use thatch_abi::{HAT_BROADCAST, HAT_FLAG, Host, OpaqueRuntime, TAG_STR, ThreadCtx, Value};
 
 use crate::strings::{self, Handle};
 use crate::thread::{ScriptFn, Status, Thread, Yield};
@@ -52,6 +55,8 @@ pub struct Target {
 pub struct Runtime {
     /// The pointer this runtime lives behind, which threads use to reach it.
     this: *mut Runtime,
+    /// The host's callbacks. `data` is the host's; the runtime only passes it back.
+    host: Host,
     pub targets: Vec<Box<Target>>,
     consts: Vec<Rc<String>>,
     const_ptrs: Vec<Handle>,
@@ -64,15 +69,16 @@ pub struct Runtime {
     timer_start_ms: f64,
     frame_started: Instant,
     rng: u64,
-    pub headless: bool,
-    pub say_count: u64,
+    /// The message of the last error, for `thatch_runtime_last_error`.
+    pub last_error: Option<String>,
 }
 
 impl Runtime {
     /// Allocates a runtime behind a raw pointer. Free it with [`Runtime::destroy`].
-    pub fn create(seed: u64) -> *mut Runtime {
+    pub fn create(host: Host, seed: u64) -> *mut Runtime {
         let rt = Box::into_raw(Box::new(Self {
             this: ptr::null_mut(),
+            host,
             targets: Vec::new(),
             consts: Vec::new(),
             const_ptrs: Vec::new(),
@@ -84,8 +90,7 @@ impl Runtime {
             timer_start_ms: 0.0,
             frame_started: Instant::now(),
             rng: seed | 1,
-            headless: true,
-            say_count: 0,
+            last_error: None,
         }));
         // SAFETY: just allocated, and nothing else knows the pointer yet.
         unsafe { (*rt).this = rt };
@@ -152,9 +157,13 @@ impl Runtime {
 
     // ---- clock --------------------------------------------------------------------------------
 
-    /// Milliseconds on the virtual clock.
+    /// Milliseconds on the host's clock, or on the virtual clock when the host has none.
     pub fn now_ms(&self) -> f64 {
-        self.frame as f64 * 1000.0 / FPS
+        match self.host.now_ms {
+            // SAFETY: the host gave this callback and its data for the runtime to call.
+            Some(now) => unsafe { now(self.host.data) },
+            None => self.frame as f64 * 1000.0 / FPS,
+        }
     }
 
     pub fn timer(&self) -> f64 {
@@ -244,8 +253,10 @@ impl Runtime {
         for t in &mut self.threads {
             t.kill();
         }
-        for t in &mut self.targets {
-            t.bubble.clear();
+        for target in 0..self.targets.len() {
+            if !self.targets[target].bubble.is_empty() {
+                self.say(target, String::new(), false);
+            }
         }
     }
 
@@ -404,14 +415,25 @@ impl Runtime {
         let text = truncate_utf16(text, 330);
         let t = &mut self.targets[target];
         t.bubble_token += 1;
-        if self.headless && !text.is_empty() {
-            self.say_count += 1;
-            let mut out = std::io::stdout().lock();
-            let _ = writeln!(out, "{} {}: {}", t.name, if think { "thinks" } else { "says" }, text);
-        }
         t.bubble = text;
+        let token = t.bubble_token;
         self.redraw_requested = true;
-        t.bubble_token
+        if let Some(say) = self.host.say {
+            let text = &self.targets[target].bubble;
+            // SAFETY: the host gave this callback and its data for the runtime to call; the text
+            // outlives the call, and the runtime pointer is the one this runtime lives behind.
+            unsafe {
+                say(
+                    self.host.data,
+                    self.this.cast::<OpaqueRuntime>(),
+                    target as i64,
+                    text.as_ptr(),
+                    text.len(),
+                    i8::from(think),
+                );
+            }
+        }
+        token
     }
 
     pub fn bubble_token(&self, target: usize) -> u64 {

@@ -35,6 +35,7 @@ Planned, not yet present: an optimizer crate over the IR, a host table in the AB
 ### Rules that keep the layers separate
 
 - The compiler never depends on `thatch-runtime`. Generated code only calls functions declared in `thatch-abi`. When you change an ABI function, update its entry in `RT_FNS`, the runtime definition in `api.rs` (a test checks the two lists match) and every backend call site together.
+- Hosts only see the C header `crates/thatch-abi/include/thatch.h`, generated from `thatch-abi` (`HOST_API`, the `Host` table). When you change the host side, update `HOST_API` or `Host`, the definition in `api.rs` (a test checks the lists match), regenerate the header with `THATCH_UPDATE_HEADER=1 cargo test -p thatch-abi` (a test fails while it is stale) and keep the headless host in `host.rs` using nothing but that API, so the samples test it.
 - The ABI is versioned. Any breaking change (a function added, removed or changed, a layout or a hat kind changed) bumps `ABI_VERSION`. Programs export the version they were built for and the host refuses a mismatch, so a stale runtime library fails loudly instead of corrupting memory.
 - `thatch-ir` and the backends know nothing about Scratch or Snap!. If a backend needs to know what a block is, the IR is missing a concept.
 - Language-specific lowering lives in the frontend, not in passes or backends.

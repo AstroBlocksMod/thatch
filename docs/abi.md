@@ -1,6 +1,8 @@
 # The C ABI
 
-A compiled program and the runtime it links against meet at a C ABI, declared in the `thatch-abi` crate. The crate is `no_std`, has no dependencies and is the single source of truth: the code generator reads the function list from it, the runtime defines every function on it (a test checks that), and a host written in C or C++ would use a header generated from it.
+A compiled program and the runtime it links against meet at a C ABI, declared in the `thatch-abi` crate. The crate is `no_std`, has no dependencies and is the single source of truth: the code generator reads the function list from it, the runtime defines every function on it (a test checks that), and a host written in C or C++ includes the header generated from it, `crates/thatch-abi/include/thatch.h`.
+
+There are two sides to it. Generated code calls the runtime (`RT_FNS`); a host, the program that owns the window and the frame loop, calls the runtime too (`HOST_API`) and is called back through a table of function pointers (`Host`).
 
 The ABI is versioned (`ABI_VERSION`). Every change to a function or a layout bumps it. A program records the version it was compiled for, and the host refuses to run a program built for another one, since a mismatch would otherwise show up as memory corruption.
 
@@ -53,4 +55,37 @@ Control
 
 ## Writing a host
 
-The headless host in `thatch-runtime` is the reference. A host owns the scheduler loop: it calls the program's init function, starts the green flag hats, steps frames, and decides what `say` does. The runtime's scheduler and value code are host-independent; a windowed host would add rendering, input and the blocks that need them, which is the next step on the [roadmap](roadmap.md). The plan is for the runtime to expose a host table of function pointers (draw, play, read input) so a host in C++ such as Scratch Everywhere! only implements those. Scratch Everywhere! is LGPL-3.0, so its host will live in a separate repository; nothing from it is part of this one.
+A host owns the window, the clock and the frame loop. The runtime owns everything Scratch: targets, variables, strings, threads and the scheduler. They meet in `thatch.h`.
+
+The host fills in a `ThatchHost` table and hands it to the runtime:
+
+```c
+typedef struct ThatchHost {
+    void *data;          /* passed back to every callback */
+    ThatchSayFn say;     /* a target said or thought something; empty text clears the bubble */
+    ThatchNowFn now_ms;  /* the clock wait and timer read; NULL for the virtual clock */
+} ThatchHost;
+```
+
+A null callback means the host does not care. Without `now_ms` the runtime uses a virtual clock of one frame per thirtieth of a second, which is what makes the headless host's runs repeatable; a windowed host passes its real clock.
+
+Then it drives the runtime through the `thatch_runtime_*` functions:
+
+```mermaid
+flowchart TD
+    create["thatch_runtime_create(&host, seed)"] --> load["thatch_runtime_load(rt, thatch_program_abi_version(), thatch_program_init)"]
+    load --> flag["thatch_runtime_green_flag(rt)"]
+    flag --> frame["thatch_runtime_frame(rt)"]
+    frame --> redraw{"thatch_runtime_redraw_requested(rt)?"}
+    redraw -->|yes| draw["draw the stage"] --> input
+    redraw -->|no| input["read input, call thatch_runtime_start_hats for keys and clicks"]
+    input --> more{"thatch_runtime_has_threads(rt)?"}
+    more -->|yes| frame
+    more -->|no| destroy["thatch_runtime_destroy(rt)"]
+```
+
+`thatch_runtime_load` returns `THATCH_LOAD_WRONG_ABI_VERSION` or `THATCH_LOAD_NO_STAGE` instead of `THATCH_LOAD_OK` when the program cannot run; `thatch_runtime_frame` returns nonzero after an error that `thatch_runtime_last_error` describes. After either, the runtime may only be destroyed. `thatch_runtime_target_count`, `thatch_runtime_target_name` and `thatch_runtime_target_is_stage` describe the program's targets, so the `say` callback can name the sprite. Nothing is thread-safe: one runtime belongs to one thread, and the host may only call into it between frames.
+
+The headless host in `thatch-runtime` is the reference implementation and uses nothing but this API, so every sample run exercises it. A host written in C or C++ such as Scratch Everywhere! implements the same table; what it still lacks is sprite state (position, costume, effects) and the input, pen and sound callbacks, which are the next steps on the [roadmap](roadmap.md). Scratch Everywhere! is LGPL-3.0, so its host lives in a separate repository; nothing from it is part of this one.
+
+The header is generated from `thatch-abi` by `cargo test -p thatch-abi` with `THATCH_UPDATE_HEADER=1` set, and a test fails when it is out of date.

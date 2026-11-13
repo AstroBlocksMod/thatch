@@ -1,11 +1,12 @@
-//! The C ABI surface: the `thatch_*` functions generated code calls. Signatures match
-//! `thatch_abi::RT_FNS`, which a test below checks.
+//! The C ABI surface: the `thatch_*` functions generated code calls, whose signatures match
+//! `thatch_abi::RT_FNS`, and the `thatch_runtime_*` functions hosts call, which match
+//! `thatch_abi::HOST_API`. Tests below check both lists.
 
 use std::ffi::c_char;
 use std::rc::Rc;
 use std::slice;
 
-use thatch_abi::{TAG_NUM, ThreadCtx, Value};
+use thatch_abi::{Host, OpaqueRuntime, TAG_NUM, ThreadCtx, Value};
 use thatch_values::{MathOp, ValueRef};
 
 use crate::scheduler::Runtime;
@@ -13,11 +14,12 @@ use crate::strings::{self, Handle};
 use crate::thread::{Frame, ScriptFn, ThreadInner, Yield};
 use crate::value::{self, VarSlot};
 
+macro_rules! table {
+    ($($f:ident),* $(,)?) => { vec![$((stringify!($f), $f as *const u8)),*] };
+}
+
 /// The runtime functions by symbol, for JIT lookup.
 pub fn symbols() -> Vec<(&'static str, *const u8)> {
-    macro_rules! table {
-        ($($f:ident),* $(,)?) => { vec![$((stringify!($f), $f as *const u8)),*] };
-    }
     table![
         thatch_add_const,
         thatch_add_target,
@@ -62,6 +64,168 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
         thatch_proc_enter,
         thatch_proc_exit,
     ]
+}
+
+/// The host API by symbol, for the test against `HOST_API`.
+pub fn host_symbols() -> Vec<(&'static str, *const u8)> {
+    table![
+        thatch_runtime_create,
+        thatch_runtime_load,
+        thatch_runtime_green_flag,
+        thatch_runtime_start_hats,
+        thatch_runtime_frame,
+        thatch_runtime_redraw_requested,
+        thatch_runtime_has_threads,
+        thatch_runtime_frame_count,
+        thatch_runtime_stop_all,
+        thatch_runtime_target_count,
+        thatch_runtime_target_name,
+        thatch_runtime_target_is_stage,
+        thatch_runtime_last_error,
+        thatch_runtime_destroy,
+    ]
+}
+
+// ---- the host API -----------------------------------------------------------------------------
+//
+// Hosts hold the runtime as an opaque pointer. `thatch_abi::HOST_API` documents each function.
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_create(host: *const Host, seed: u64) -> *mut OpaqueRuntime {
+    // SAFETY: the host passes its own table, or null for no callbacks at all.
+    let host =
+        if host.is_null() { Host { data: std::ptr::null_mut(), say: None, now_ms: None } } else { unsafe { *host } };
+    Runtime::create(host, seed).cast::<OpaqueRuntime>()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_load(
+    rt: *mut OpaqueRuntime,
+    abi_version: i32,
+    init: thatch_abi::InitFn,
+) -> i32 {
+    if abi_version != thatch_abi::ABI_VERSION as i32 {
+        return thatch_abi::LOAD_WRONG_ABI_VERSION;
+    }
+    // SAFETY: `rt` comes from `thatch_runtime_create`, and `init` only registers, it runs no
+    // script, so no thread holds the runtime.
+    unsafe {
+        init(rt);
+        let r = &*rt.cast::<Runtime>();
+        if r.targets.iter().any(|t| t.is_stage) { thatch_abi::LOAD_OK } else { thatch_abi::LOAD_NO_STAGE }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_green_flag(rt: *mut OpaqueRuntime) {
+    // SAFETY: `rt` comes from `thatch_runtime_create`; hosts call this between frames.
+    unsafe { (*rt.cast::<Runtime>()).start_flag() }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_start_hats(rt: *mut OpaqueRuntime, hat: i64, arg: *const c_char, len: usize) {
+    // SAFETY: as `thatch_runtime_green_flag`; `arg` is `len` bytes the host owns.
+    unsafe {
+        let arg = text(arg.cast::<u8>(), len as i64).to_owned();
+        (*rt.cast::<Runtime>()).start_hats(hat, &arg);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_frame(rt: *mut OpaqueRuntime) -> i32 {
+    // SAFETY: `rt` comes from `thatch_runtime_create`, and the host holds no reference into it.
+    unsafe {
+        match Runtime::frame(rt.cast::<Runtime>()) {
+            Ok(()) => 0,
+            Err(e) => {
+                (*rt.cast::<Runtime>()).last_error = Some(e);
+                1
+            }
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_redraw_requested(rt: *const OpaqueRuntime) -> i8 {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe { i8::from((*rt.cast::<Runtime>()).redraw_requested) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_has_threads(rt: *const OpaqueRuntime) -> i8 {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe { i8::from((*rt.cast::<Runtime>()).has_threads()) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_frame_count(rt: *const OpaqueRuntime) -> u64 {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe { (*rt.cast::<Runtime>()).frame }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_stop_all(rt: *mut OpaqueRuntime) {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe { (*rt.cast::<Runtime>()).stop_all() }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_target_count(rt: *const OpaqueRuntime) -> i64 {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe { (*rt.cast::<Runtime>()).targets.len() as i64 }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_target_name(
+    rt: *const OpaqueRuntime,
+    target: i64,
+    len: *mut usize,
+) -> *const c_char {
+    // SAFETY: as `thatch_runtime_green_flag`; `len` is the host's to write, or null.
+    unsafe {
+        let r = &*rt.cast::<Runtime>();
+        let Some(t) = usize::try_from(target).ok().and_then(|i| r.targets.get(i)) else {
+            if !len.is_null() {
+                *len = 0;
+            }
+            return std::ptr::null();
+        };
+        if !len.is_null() {
+            *len = t.name.len();
+        }
+        t.name.as_ptr().cast::<c_char>()
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_target_is_stage(rt: *const OpaqueRuntime, target: i64) -> i8 {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe {
+        let r = &*rt.cast::<Runtime>();
+        let t = usize::try_from(target).ok().and_then(|i| r.targets.get(i));
+        i8::from(t.is_some_and(|t| t.is_stage))
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_last_error(rt: *const OpaqueRuntime, len: *mut usize) -> *const c_char {
+    // SAFETY: as `thatch_runtime_target_name`.
+    unsafe {
+        let e = (*rt.cast::<Runtime>()).last_error.as_deref().unwrap_or("");
+        if !len.is_null() {
+            *len = e.len();
+        }
+        if e.is_empty() { std::ptr::null() } else { e.as_ptr().cast::<c_char>() }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_destroy(rt: *mut OpaqueRuntime) {
+    // SAFETY: `rt` comes from `thatch_runtime_create` and is not used after this.
+    unsafe {
+        Runtime::shutdown(rt.cast::<Runtime>());
+        Runtime::destroy(rt.cast::<Runtime>());
+    }
 }
 
 // ---- helpers ----------------------------------------------------------------------------------
@@ -531,5 +695,14 @@ mod tests {
             assert!(symbols.iter().any(|(name, _)| *name == f.name), "missing symbol {}", f.name);
         }
         assert_eq!(symbols.len(), thatch_abi::RT_FNS.len());
+    }
+
+    #[test]
+    fn every_host_api_function_has_a_symbol() {
+        let symbols = host_symbols();
+        for f in thatch_abi::HOST_API {
+            assert!(symbols.iter().any(|(name, _)| *name == f.name), "missing symbol {}", f.name);
+        }
+        assert_eq!(symbols.len(), thatch_abi::HOST_API.len());
     }
 }

@@ -39,6 +39,10 @@ enum Cmd {
         /// Write an object file and do not link.
         #[arg(long)]
         object: bool,
+        /// Leave out `main`, for a host that provides its own and drives the program through the C
+        /// API in thatch.h. Only with --object.
+        #[arg(long, requires = "object")]
+        no_main: bool,
         /// The runtime library to link against. Defaults to libthatch_runtime.a next to this
         /// executable, or $THATCH_RUNTIME_LIB.
         #[arg(long)]
@@ -68,7 +72,9 @@ fn main() -> anyhow::Result<()> {
 fn command(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Cmd::Run { project, frames, timing, seed } => run(&project, RunOptions { frames, timing, seed }),
-        Cmd::Build { project, output, object, runtime_lib } => build(&project, output, object, runtime_lib),
+        Cmd::Build { project, output, object, no_main, runtime_lib } => {
+            build(&project, output, object, !no_main, runtime_lib)
+        }
         Cmd::Dump { project } => {
             let lowered = lower(&project)?;
             print!("{}", thatch_ir::dump(&lowered.program));
@@ -118,10 +124,11 @@ fn build(
     project: &Path,
     output: Option<PathBuf>,
     object_only: bool,
+    with_main: bool,
     runtime_lib: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let lowered = lower(project)?;
-    let bytes = thatch_codegen::compile_object(&lowered.program)?;
+    let bytes = thatch_codegen::compile_object(&lowered.program, with_main)?;
     let stem = project.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "program".to_owned());
     let output = output.unwrap_or_else(|| PathBuf::from(if object_only { format!("{stem}.o") } else { stem.clone() }));
     // Everything is written into a fresh private directory next to the output and moved into
