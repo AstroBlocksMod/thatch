@@ -2,16 +2,16 @@
 
 ## Overview
 
-Thatch is an ahead-of-time compiler, written in Rust, that turns block-based programs into standalone native executables. It starts with Scratch 3.0 (`.sb3`) and is designed to grow to Snap! later. It is a real optimizing compiler, not an interpreter or a VM packaged with the project. License: Apache-2.0 with LLVM Exceptions (`Apache-2.0 WITH LLVM-exception`, see `LICENSE`). The exception means Thatch's own runtime code adds no attribution terms to a user's compiled executable, so people can ship what Thatch builds under any license. Use the SPDX expression above in every crate's `license` field. Be strict about what gets linked into output binaries (`thatch-runtime`, `thatch-abi`, anything they pull in): no copyleft there at all. Permissive licenses that ask for a notice (MIT, BSD, plain Apache-2.0) are fine in the runtime, since Rust's standard library already brings that duty into every executable; `docs/getting-started.md` tells users which notices to ship, so keep it current when a runtime dependency is added. The compiler itself can use any permissive dependency. Enforce this with `cargo deny` once it is set up.
+Thatch is an optimizing compiler, written in Rust, for block-based programs. Today it compiles them ahead of time into standalone native executables; the IR, the backends and the C ABI are built so the same project can also be compiled just in time or for managed platforms such as the JVM and the CLR. It starts with Scratch 3.0 (`.sb3`) and is designed to grow to Snap! later. It is a real optimizing compiler, not an interpreter or a VM packaged with the project. License: Apache-2.0 with LLVM Exceptions (`Apache-2.0 WITH LLVM-exception`, see `LICENSE`). The exception means Thatch's own runtime code adds no attribution terms to a user's compiled executable, so people can ship what Thatch builds under any license. Use the SPDX expression above in every crate's `license` field. Be strict about what gets linked into output binaries (`thatch-runtime`, `thatch-abi`, anything they pull in): no copyleft there at all. Permissive licenses that ask for a notice (MIT, BSD, plain Apache-2.0) are fine in the runtime, since Rust's standard library already brings that duty into every executable; `docs/getting-started.md` tells users which notices to ship, so keep it current when a runtime dependency is added. The compiler itself can use any permissive dependency. Enforce this with `cargo deny` once it is set up.
 
 Optional hosts are the one exception. A host that drives Thatch output through the C ABI may be copyleft (Scratch Everywhere! is LGPL-3.0) as long as it lives in its own repository and nothing from it enters this one: no code, no headers, no test dependency. This repository only knows the ABI. When a host carries license duties for the people who ship games built with it, `docs/` says what they are, and `thatch build` should make them easy to meet (for example by writing the object files LGPL relinking needs).
 
 Goals, in priority order:
 
 1. **Run vanilla Scratch exactly.** A standard `.sb3` must behave as it does in scratch-vm: same casting, same number formatting, same list and string quirks, same frame and thread timing. Speed never justifies a behavior difference.
-2. **Native speed.** No browser and no JavaScript engine. Projects compile through a mid-level IR to machine code.
+2. **Native speed.** No browser and no JavaScript engine. Projects compile through a mid-level IR to machine code, ahead of time or just in time, or to bytecode that a managed platform's JIT turns into machine code.
 3. **Pluggable runtimes.** Compiled code talks to the outside world only through a versioned C ABI, so the same output can drive Scratch Everywhere! (C++), other engines such as Project Tachyon, or a headless CLI runtime.
-4. **Pluggable backends.** Codegen sits behind the IR. Cranelift first (fast builds), then LLVM (maximum optimization), with GCC possible later.
+4. **Pluggable backends.** Codegen sits behind the IR, and a backend is anything that consumes it: Cranelift first (fast builds, and the JIT), then LLVM (maximum optimization), GCC possibly later, and JVM and CLR backends that read a versioned serialized form of the IR and are written in their platform's own language. Every backend calls the same runtime through the C ABI.
 5. **A Scratch superset.** Later: compile-time macros, functions with return values, static types and FFI into the host engine, all while still loading every standard `.sb3`.
 6. **Snap!.** Later still: first-class closures, anonymous functions and nested lists, added as a new frontend and new IR features, without rewriting the backends or the ABI.
 
@@ -30,7 +30,7 @@ A Cargo workspace. The crates, in pipeline order (see `docs/architecture.md` for
 
 Outside `crates/`: `samples/` (test projects as `project.json` with the `expected.txt` scratch-vm prints for them), `tools/scratch-vm-oracle/` (the Node script that produces those), `docs/` (the Zensical site).
 
-Planned, not yet present: an optimizer crate over the IR, a host table in the ABI with a windowed host, benchmarks, an LLVM backend.
+Planned, not yet present: an optimizer crate over the IR, a windowed host, benchmarks, an LLVM backend, a pass that makes scripts resumable without stack switching, a tiering JIT, and a serialized IR format with JVM and CLR backends on top of it.
 
 ### Rules that keep the layers separate
 
@@ -39,6 +39,7 @@ Planned, not yet present: an optimizer crate over the IR, a host table in the AB
 - The ABI is versioned. Any breaking change (a function added, removed or changed, a layout or a hat kind changed) bumps `ABI_VERSION`. Programs export the version they were built for and the host refuses a mismatch, so a stale runtime library fails loudly instead of corrupting memory.
 - `thatch-ir` and the backends know nothing about Scratch or Snap!. If a backend needs to know what a block is, the IR is missing a concept.
 - Language-specific lowering lives in the frontend, not in passes or backends.
+- Scheduling lives in the runtime, once. No backend brings a scheduler or thread model of its own; a backend that cannot switch stacks gets its pauses from an IR pass, not from a second implementation of scratch-vm's timing rules.
 - Superset features must not break vanilla projects. Store superset data so that the standard Scratch editor still loads the project, and keep a project that uses no superset features compiling exactly as a vanilla one.
 
 ## Scratch semantics (IMPORTANT)
