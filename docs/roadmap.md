@@ -24,17 +24,21 @@ The headless host stays as the reference the samples check against, since Scratc
 - [x] A host table in the ABI and a C header for hosts: a host creates the runtime with its callbacks (`say`, the clock), loads the program and steps frames; the headless host is its first implementation
 - [x] Sprite state in the runtime (position, direction, size, costume, visibility, effects, layer) and the motion and looks blocks lowered against it, testable headless through the sensing reporters, with a callback that tells the host what to draw
 - [x] Input in the host table: keys, mouse, clicks, and the hats they start
+- [ ] Stage size and frame rate as values the runtime reports to hosts instead of constants in the ABI, before any host hard-codes 480 by 360 at 30 frames per second
 - [ ] The Scratch Everywhere! host in its own repository: submodule, hook patch and adapter, built with their JIT and DECtalk off (the JIT starts background threads, and DECtalk's license is unclear); Linux first, then macOS and Windows
 - [ ] `thatch build --host scratch-everywhere`: links the game against the shared library and writes the license notices next to it
 - [ ] Variables synced to Scratch Everywhere!'s copies so its monitors show them
 - [ ] Pen
-- [ ] Key, mouse and click hats, and the sensing blocks that need a stage
+- [ ] The sensing blocks that need a stage: touching, touching color, distance to, ask, and dragging sprites
 - [ ] Sound
+- [ ] A headed host of our own, in Rust on wgpu with no copyleft, that draws sprites and pen and is the reference for screenshot tests. It batches a frame's pen lines and stamps into a few draw calls, in order, which is where 3D projects that fill triangles with the pen spend their time. wgpu is MIT or Apache-2.0, so whether games built with it ship those notices is decided before it does
 
 ## Then: close the compatibility gaps
 
 - [ ] Lists, including the list blocks and list reporters in `join`
 - [ ] Clones: `create clone of`, `when I start as a clone`, `delete this clone`
+- [ ] Scratch's limits by default: at most 300 clones and 200,000 list items, as in scratch-vm
+- [ ] Raised limits on request: clone count, list size, stage size, frame rate, fencing and turbo mode, through `thatch` flags and through a project's TurboWarp settings comment (the JSON stage comment that ends in `// _twconfig_`). Thatch says which settings it applied, and a flag ignores the comment. Settings TurboWarp has no field for go in a `// _thatchconfig_` comment of the same shape
 - [ ] The remaining hats: backdrop switches, timer and loudness hats
 - [ ] `answer`, `username`, `days since 2000`, `current` date and time
 - [ ] A conformance suite: run the Scratch Foundation's and TurboWarp's test projects through the scratch-vm oracle and compare
@@ -42,13 +46,25 @@ The headless host stays as the reference the samples check against, since Scratc
 
 ## Then: faster
 
+Speed may change how a value is computed, never which value comes out. Scratch numbers are 64-bit doubles, and add, subtract, multiply, divide and square root are exactly rounded, so doing the same operations on several list items at once in SIMD lanes gives the same bits. Summing a list in a different order does not, and neither do vectorized sine and cosine, so those stay scalar.
+
 - [ ] Benchmarks against scratch-vm and TurboWarp, run in CI
 - [ ] Type inference for strings and booleans, not only numbers
+- [ ] Numeric lists stored as plain doubles when type inference shows they only ever hold numbers
 - [ ] Inlining of small custom blocks and loop-invariant code motion in an optimizer crate over the IR
-- [ ] Cheaper yields: a per-frame budget check instead of a context switch when only one thread is active
+- [ ] Bounds checks of `item i of list` moved out of a loop once the range of `i` is known
+- [ ] Cheaper yields: a per-frame budget check instead of a context switch when only one thread is active, and a check without a runtime call at the end of loops in warp mode (which is inherited, and where the 500 ms limit still applies)
+- [ ] SIMD in the runtime for collision tests, `touching color`, list search and pen compositing
 - [ ] An LLVM backend behind the same backend trait, for release builds
+- [ ] Vectorized loops in the LLVM backend for work done on every item of a list, such as the vertex transforms of 3D engines, only where the result is bit-identical to running the items one by one
 
 ## Then: beyond Scratch
 
 - [ ] The superset: custom blocks with return values, static type annotations, compile-time macros and FFI into the host, stored so the Scratch editor still loads the project
+- [ ] Macro extensions that expand into standard Scratch blocks, so a project stays portable to Scratch, TurboWarp and goboscript. Each expansion carries a block comment naming its macro, so tools can fold it back. Thatch recognizes the expansions and lowers them onto fast paths that give exactly the result the blocks would, and an expansion someone edited in the Scratch editor takes the general path
 - [ ] A Snap! frontend: closures, anonymous functions and nested lists on the same IR and runtime
+
+## Not planned
+
+- GPU compute for a project's own math. 3D projects do their math on the CPU and draw on the GPU, and that split stays: the math gets faster through the items above, the drawing through the wgpu host. Shaders would compute in 32-bit floats, since 64-bit floats are optional in wgpu and missing on Metal, which changes results that feed comparisons such as depth sorting; and the lists in real projects are small enough that copying them to the GPU each frame costs more than it saves.
+- NPU backends such as ONNX Runtime, unless a real project needs one.
