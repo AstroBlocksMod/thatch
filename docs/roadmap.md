@@ -17,9 +17,15 @@ This page lists what is planned for Thatch, roughly in the order it will happen.
 
 A compiler that cannot draw runs no real project, and the engine-agnostic ABI is the riskiest design decision in the plan. Only a real host proves it, so the first headed host comes before the long tail of blocks.
 
+The headed host is [Scratch Everywhere!](https://github.com/ScratchEverywhere/ScratchEverywhere), the C++ Scratch player, chosen because it is the most reliable native Scratch runtime around. Thatch keeps its own scheduler, which follows scratch-vm more closely than theirs (hat order within a sprite, restarted threads, `wait` in warp mode, the recursion rule), and uses Scratch Everywhere! for what it is good at: rendering, pen, costumes, sound, input and the sensing blocks that need a stage. It is LGPL-3.0, so everything that touches it lives in a separate repository (`thatch-scratch-everywhere`) that pins it as a git submodule, carries one small patch (its two `startThread` functions hand a hat to Thatch instead of running the script themselves), and holds the adapter that implements Thatch's host table and runs the frame loop. Desktop is the target; the library is linked dynamically there, which satisfies the LGPL on its own. Consoles are not planned, and most of them would need the LLVM backend anyway, since Cranelift only targets x86-64 and AArch64 among them.
+
+The headless host stays as the reference the samples check against, since Scratch Everywhere!'s own headless mode prints nothing and schedules differently.
+
 - [ ] Sprite state in the runtime (position, direction, size, costume, visibility, effects, layer) and the motion and looks blocks lowered against it, testable headless through the sensing reporters
-- [ ] A host table in the ABI: draw, play, read input, so a host only implements those
-- [ ] The first headed host: Scratch Everywhere! through the C ABI, or a minimal window if that is quicker to stand up
+- [ ] A host table in the ABI: draw, play, read input, start a hat on a key or a click, so a host only implements those; the headless host becomes its first implementation
+- [ ] The Scratch Everywhere! host in its own repository: submodule, hook patch and adapter, built with their JIT and DECtalk off (the JIT starts background threads, and DECtalk's license is unclear); Linux first, then macOS and Windows
+- [ ] `thatch build --host scratch-everywhere`: links the game against the shared library and writes the license notices next to it
+- [ ] Variables synced to Scratch Everywhere!'s copies so its monitors show them
 - [ ] Pen
 - [ ] Key, mouse and click hats, and the sensing blocks that need a stage
 - [ ] Sound
