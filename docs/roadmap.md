@@ -58,6 +58,19 @@ Speed may change how a value is computed, never which value comes out. Scratch n
 - [ ] An LLVM backend behind the same backend trait, for release builds
 - [ ] Vectorized loops in the LLVM backend for work done on every item of a list, such as the vertex transforms of 3D engines, only where the result is bit-identical to running the items one by one
 
+## Then: more backends
+
+Thatch plugs in at both ends: a backend is anything that consumes the IR, and every backend's output calls the same Rust runtime through the C ABI and uses its scheduler. scratch-vm's timing rules then exist in one place, however a project is compiled. Ahead-of-time native executables are the first use of this, not the only one.
+
+- [ ] Resumable scripts: a language-neutral pass that turns each script, and each custom block that may yield, into a state machine whose values live across a pause in a frame object, for backends that cannot switch stacks. Custom blocks that never yield, and warp code, stay plain calls. The native backends switch to it only if benchmarks favor it over stackful threads
+- [ ] The runtime built as a shared library too, for backends whose output loads it at run time
+- [ ] A tiering JIT on Cranelift: compile every script quickly, then recompile the hot ones with the types seen at run time, behind guards that fall back when a type changes
+- [ ] A serialized IR format with a version number and a compatibility rule like the ABI's, so a backend can be written in any language and live outside the compiler. A test checks that every such backend reads the IR of every sample
+- [ ] A JVM backend: an emitter in Kotlin on ASM, starting from jScratch's code generator once it is relicensed, writing class files that call the runtime through the Foreign Function and Memory API (Java 22 or newer)
+- [ ] A CLR backend: an emitter in C# on .NET's `PersistedAssemblyBuilder` (.NET 9 or newer), writing assemblies that call the runtime through P/Invoke and give the scheduler `UnmanagedCallersOnly` entry points to resume
+
+The managed emitters are written in their platform's own language because that is where the mature tools are. The Rust crates for writing class files and .NET assemblies are young and mostly the work of one person each, and the .NET one is GPL-3.0, which the compiler cannot link.
+
 ## Then: beyond Scratch
 
 - [ ] The superset: custom blocks with return values, static type annotations, compile-time macros and FFI into the host, stored so the Scratch editor still loads the project
