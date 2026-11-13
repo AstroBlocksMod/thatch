@@ -2,14 +2,15 @@
 //!
 //! A frame steps the threads in passes, as scratch-vm's sequencer does: a pass steps every thread
 //! that is not done and not waiting for the next frame, in list order, including threads started
-//! during the pass. Passes repeat while some stepped thread is still active, no redraw was requested
-//! and less than 75 percent of the frame time has gone by. The clock that `wait` and `timer` read
-//! comes from the host; without one it is virtual, one thirtieth of a second per frame, so headless
-//! runs are repeatable. Only the frame budget is always real time.
+//! during the pass. Passes repeat while some stepped thread is still active (a thread waiting on a
+//! timer or on other threads is stepped but does not count), no redraw was requested and less than
+//! 75 percent of the frame time has gone by. The clock that `wait` and `timer` read comes from the
+//! host; without one it is virtual, one thirtieth of a second per frame, so headless runs are
+//! repeatable. Only the frame budget is always real time.
 //!
 //! The runtime talks back to its host through the [`Host`] table it was created with: every bubble
-//! goes to `say`, and the clock to `now_ms`. The host drives the frame loop through the C API in
-//! `api.rs`.
+//! goes to `say`, the clock to `now_ms`, and every change to how a sprite looks to
+//! `sprite_changed` (see `sprite.rs`). The host drives the frame loop through the C API in `api.rs`.
 //!
 //! # Aliasing
 //!
@@ -31,7 +32,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use corosensei::CoroutineResult;
-use thatch_abi::{HAT_BROADCAST, HAT_FLAG, Host, OpaqueRuntime, TAG_STR, ThreadCtx, Value};
+use thatch_abi::{EFFECT_COUNT, HAT_BROADCAST, HAT_FLAG, Host, OpaqueRuntime, TAG_STR, ThreadCtx, Value};
 
 use crate::strings::{self, Handle};
 use crate::thread::{ScriptFn, Status, Thread, Yield};
@@ -56,14 +57,32 @@ pub struct Target {
     pub scripts: Vec<Script>,
     pub bubble: String,
     pub bubble_token: u64,
+    // How the target looks; see `sprite.rs`.
+    pub x: f64,
+    pub y: f64,
+    pub direction: f64,
+    pub size: f64,
+    pub costume: usize,
+    pub costumes: Vec<Rc<String>>,
+    pub visible: bool,
+    pub rotation_style: i64,
+    pub draggable: bool,
+    pub volume: f64,
+    pub effects: [f64; EFFECT_COUNT],
 }
 
 pub struct Runtime {
     /// The pointer this runtime lives behind, which threads use to reach it.
     this: *mut Runtime,
     /// The host's callbacks. `data` is the host's; the runtime only passes it back.
-    host: Host,
+    pub(crate) host: Host,
     pub targets: Vec<Box<Target>>,
+    /// Target indices in drawing order, the stage first and the frontmost sprite last. Hats start
+    /// in the reverse of this order, so the layer blocks change it.
+    pub order: Vec<usize>,
+    /// The mouse in Scratch coordinates, as the host last reported it.
+    pub mouse_x: f64,
+    pub mouse_y: f64,
     consts: Vec<Rc<String>>,
     const_ptrs: Vec<Handle>,
     pub threads: Vec<Thread>,
@@ -95,6 +114,9 @@ impl Runtime {
             this: ptr::null_mut(),
             host,
             targets: Vec::new(),
+            order: Vec::new(),
+            mouse_x: 0.0,
+            mouse_y: 0.0,
             consts: Vec::new(),
             const_ptrs: Vec::new(),
             threads: Vec::new(),
@@ -144,8 +166,56 @@ impl Runtime {
             scripts: Vec::new(),
             bubble: String::new(),
             bubble_token: 0,
+            x: 0.0,
+            y: 0.0,
+            direction: 90.0,
+            size: 100.0,
+            costume: 0,
+            costumes: Vec::new(),
+            visible: true,
+            rotation_style: thatch_abi::ROTATE_ALL_AROUND,
+            draggable: false,
+            volume: 100.0,
+            effects: [0.0; EFFECT_COUNT],
         }));
-        self.targets.len() - 1
+        let index = self.targets.len() - 1;
+        // The stage is drawn first whatever order it was registered in.
+        if is_stage {
+            self.order.insert(0, index)
+        } else {
+            self.order.push(index)
+        }
+        index
+    }
+
+    pub fn add_costume(&mut self, target: usize, name: String) {
+        self.targets[target].costumes.push(Rc::new(name));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_sprite(
+        &mut self,
+        target: usize,
+        x: f64,
+        y: f64,
+        direction: f64,
+        size: f64,
+        costume: i64,
+        visible: bool,
+        rotation_style: i64,
+        draggable: bool,
+        volume: f64,
+    ) {
+        let t = &mut self.targets[target];
+        t.x = x;
+        t.y = y;
+        t.direction = direction;
+        t.size = size;
+        t.costume = usize::try_from(costume).unwrap_or(0).min(t.costumes.len().saturating_sub(1));
+        t.visible = visible;
+        t.rotation_style = rotation_style;
+        t.draggable = draggable;
+        t.volume = volume;
     }
 
     pub fn add_num_var(&mut self, target: usize, name: String, initial: f64) {
@@ -170,7 +240,7 @@ impl Runtime {
         self.targets[target].scripts.push(Script { hat, arg, func });
     }
 
-    fn stage_index(&self) -> usize {
+    pub(crate) fn stage_index(&self) -> usize {
         self.targets.iter().position(|t| t.is_stage).unwrap_or(0)
     }
 
@@ -254,7 +324,8 @@ impl Runtime {
     /// place by the new one. Returns the ids of the threads started.
     pub fn start_hats(&mut self, hat: i64, arg: &str) -> Vec<u64> {
         let mut started = Vec::new();
-        for target in (0..self.targets.len()).rev() {
+        let order = self.order.clone();
+        for target in order.into_iter().rev() {
             for script in 0..self.targets[target].scripts.len() {
                 let s = &self.targets[target].scripts[script];
                 if s.hat != hat {
@@ -394,6 +465,7 @@ impl Runtime {
         let result = coroutine.resume(());
         let status = match result {
             CoroutineResult::Yield(Yield::Loop) => Status::Running,
+            CoroutineResult::Yield(Yield::Wait) => Status::Waiting,
             CoroutineResult::Yield(Yield::Tick) => Status::TickYield,
             CoroutineResult::Return(()) => Status::Done,
         };
@@ -454,6 +526,11 @@ impl Runtime {
 
     pub fn bubble_token(&self, target: usize) -> u64 {
         self.targets[target].bubble_token
+    }
+
+    /// The runtime as the host sees it, for callbacks.
+    pub(crate) fn opaque(&self) -> *mut OpaqueRuntime {
+        self.this.cast::<OpaqueRuntime>()
     }
 }
 

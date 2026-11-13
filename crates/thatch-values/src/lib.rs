@@ -423,6 +423,51 @@ fn tan(angle: f64) -> f64 {
     }
 }
 
+/// `MathUtil.clamp`: `n` kept between `min` and `max`. A NaN anywhere gives NaN, as JavaScript's
+/// `Math.min(Math.max(n, min), max)` has it.
+pub fn clamp(n: f64, min: f64, max: f64) -> f64 {
+    js_min(js_max(n, min), max)
+}
+
+/// `Math.max` of two numbers: NaN wins.
+fn js_max(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() { f64::NAN } else { a.max(b) }
+}
+
+/// `Math.min` of two numbers: NaN wins.
+fn js_min(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() { f64::NAN } else { a.min(b) }
+}
+
+/// `MathUtil.wrapClamp`: `n` wrapped into `min..=max`, so `wrapClamp(7, 1, 5)` is 2.
+pub fn wrap_clamp(n: f64, min: f64, max: f64) -> f64 {
+    let range = (max - min) + 1.0;
+    n - (((n - min) / range).floor() * range)
+}
+
+/// A sprite direction wrapped into -179..=180, as `setDirection` keeps it.
+pub fn wrap_direction(direction: f64) -> f64 {
+    wrap_clamp(direction, -179.0, 180.0)
+}
+
+/// `MathUtil.degToRad`.
+pub fn deg_to_rad(deg: f64) -> f64 {
+    deg * std::f64::consts::PI / 180.0
+}
+
+/// `MathUtil.radToDeg`.
+pub fn rad_to_deg(rad: f64) -> f64 {
+    rad * 180.0 / std::f64::consts::PI
+}
+
+/// The `x position` and `y position` reporters: a coordinate within a billionth of a whole number
+/// is reported as that number (scratch-vm's `limitPrecision`).
+pub fn limit_precision(coordinate: f64) -> f64 {
+    let rounded = round(coordinate);
+    let delta = coordinate - rounded;
+    if delta.abs() < 1e-9 { rounded } else { coordinate }
+}
+
 /// `length of`: the string's length in UTF-16 code units.
 pub fn length(s: &str) -> f64 {
     s.encode_utf16().count() as f64
@@ -640,6 +685,24 @@ mod tests {
         assert_eq!(js_number(&format!("0x{}1", "0".repeat(1000))), 1.0);
         assert_eq!(js_number(&format!("0b1{}", "0".repeat(1023))), 2f64.powi(1023));
         assert_eq!(js_number(&format!("0b1{}", "0".repeat(1024))), f64::INFINITY);
+    }
+
+    #[test]
+    fn angles_and_coordinates() {
+        assert_eq!(wrap_clamp(7.0, 1.0, 5.0), 2.0);
+        assert_eq!(wrap_clamp(0.0, 1.0, 5.0), 5.0);
+        assert_eq!(wrap_clamp(-11.0, -10.0, 6.0), 6.0);
+        assert_eq!(wrap_direction(180.0), 180.0);
+        assert_eq!(wrap_direction(181.0), -179.0);
+        assert_eq!(wrap_direction(-180.0), 180.0);
+        assert_eq!(wrap_direction(450.0), 90.0);
+        assert_eq!(clamp(5.0, 0.0, 3.0), 3.0);
+        assert_eq!(clamp(-1.0, 0.0, 3.0), 0.0);
+        assert!(clamp(f64::NAN, 0.0, 3.0).is_nan());
+        assert_eq!(limit_precision(10.000000000001), 10.0);
+        assert_eq!(limit_precision(10.5), 10.5);
+        assert_eq!(limit_precision(-0.4), -0.4);
+        assert_eq!(rad_to_deg(deg_to_rad(90.0)), 90.0);
     }
 
     #[test]

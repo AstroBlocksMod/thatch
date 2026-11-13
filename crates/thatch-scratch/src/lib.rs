@@ -11,8 +11,8 @@
 use std::collections::{HashMap, HashSet};
 
 use thatch_ir::{
-    AnyVar, BinOp, Const, Expr, FuncId, Function, Hat, MATH_OPS, NumVar, Param, Program, RtExpr, RtStmt, Script, Stmt,
-    Target, Type, UnOp, VarRef,
+    AnyVar, BinOp, Const, Effect, Expr, FuncId, Function, Hat, MATH_OPS, NumVar, Param, Program, RotationStyle, RtExpr,
+    RtStmt, Script, SpriteState, Stmt, Target, Type, UnOp, VarRef,
 };
 use thatch_sb3::{Block, Input, Primitive, Project, field_id, field_value, parse_input};
 
@@ -361,7 +361,29 @@ impl<'a> Lowerer<'a> {
                 any_vars.push(AnyVar { name: v.name.clone(), initial });
             }
         }
-        Target { name: target.name.clone(), is_stage: target.is_stage, num_vars, any_vars, scripts }
+        let mut costumes = target.costume_names();
+        if costumes.is_empty() {
+            costumes.push(String::new());
+        }
+        // The loader clamps the costume index and wraps the direction, as scratch-vm's does.
+        let costume = target.current_costume.clamp(0, costumes.len() as i64 - 1) as u32;
+        let rotation_style = match target.rotation_style.as_str() {
+            "left-right" => RotationStyle::LeftRight,
+            "don't rotate" => RotationStyle::DontRotate,
+            _ => RotationStyle::AllAround,
+        };
+        let state = SpriteState {
+            x: target.x,
+            y: target.y,
+            direction: thatch_values::wrap_direction(target.direction),
+            size: target.size,
+            costume,
+            visible: target.visible,
+            rotation_style,
+            draggable: target.draggable,
+            volume: target.volume,
+        };
+        Target { name: target.name.clone(), is_stage: target.is_stage, num_vars, any_vars, scripts, costumes, state }
     }
 
     fn lower_script(&mut self, hat: &Block, name: String) -> FuncId {
@@ -525,6 +547,126 @@ impl<'a> Lowerer<'a> {
             }
             "procedures_call" => self.lower_call(id, block, out),
             "sensing_resettimer" => out.push(Stmt::Rt(RtStmt::ResetTimer, Vec::new())),
+
+            // Motion.
+            "motion_movesteps" => {
+                let steps = self.input(block, "STEPS", Type::Num);
+                out.push(Stmt::Rt(RtStmt::MoveSteps, vec![steps]));
+            }
+            "motion_gotoxy" => {
+                let x = self.input(block, "X", Type::Num);
+                let y = self.input(block, "Y", Type::Num);
+                out.push(Stmt::Rt(RtStmt::GoToXY, vec![x, y]));
+            }
+            "motion_goto" => {
+                let to = self.input(block, "TO", Type::Str);
+                out.push(Stmt::Rt(RtStmt::GoTo, vec![to]));
+            }
+            "motion_turnright" | "motion_turnleft" => {
+                let mut degrees = self.input(block, "DEGREES", Type::Num);
+                if block.opcode == "motion_turnleft" {
+                    degrees = Expr::Binary(BinOp::Sub, Box::new(Expr::Num(0.0)), Box::new(degrees));
+                }
+                out.push(Stmt::Rt(RtStmt::Turn, vec![degrees]));
+            }
+            "motion_pointindirection" => {
+                let direction = self.input(block, "DIRECTION", Type::Num);
+                out.push(Stmt::Rt(RtStmt::PointInDirection, vec![direction]));
+            }
+            "motion_pointtowards" => {
+                let towards = self.input(block, "TOWARDS", Type::Str);
+                out.push(Stmt::Rt(RtStmt::PointTowards, vec![towards]));
+            }
+            "motion_glidesecstoxy" => {
+                let secs = self.input(block, "SECS", Type::Num);
+                let x = self.input(block, "X", Type::Num);
+                let y = self.input(block, "Y", Type::Num);
+                out.push(Stmt::Rt(RtStmt::Glide, vec![secs, x, y]));
+            }
+            "motion_glideto" => {
+                let secs = self.input(block, "SECS", Type::Num);
+                let to = self.input(block, "TO", Type::Str);
+                out.push(Stmt::Rt(RtStmt::GlideTo, vec![secs, to]));
+            }
+            "motion_ifonedgebounce" => out.push(Stmt::Rt(RtStmt::Bounce, Vec::new())),
+            "motion_setrotationstyle" => {
+                let style = match field_value(block, "STYLE").unwrap_or_default().as_str() {
+                    "all around" => RotationStyle::AllAround,
+                    "left-right" => RotationStyle::LeftRight,
+                    "don't rotate" => RotationStyle::DontRotate,
+                    // scratch-vm leaves the style alone for anything else.
+                    _ => return,
+                };
+                out.push(Stmt::Rt(RtStmt::SetRotationStyle(style), Vec::new()));
+            }
+            "motion_changexby" | "motion_setx" | "motion_changeyby" | "motion_sety" => {
+                let (rt, name) = match block.opcode.as_str() {
+                    "motion_changexby" => (RtStmt::ChangeX, "DX"),
+                    "motion_setx" => (RtStmt::SetX, "X"),
+                    "motion_changeyby" => (RtStmt::ChangeY, "DY"),
+                    _ => (RtStmt::SetY, "Y"),
+                };
+                let v = self.input(block, name, Type::Num);
+                out.push(Stmt::Rt(rt, vec![v]));
+            }
+            // Scratch 1.4 blocks that scratch-vm keeps as no-ops.
+            "motion_scroll_right"
+            | "motion_scroll_up"
+            | "motion_align_scene"
+            | "looks_hideallsprites"
+            | "looks_changestretchby"
+            | "looks_setstretchto" => {}
+
+            // Looks.
+            "looks_show" => out.push(Stmt::Rt(RtStmt::Show, Vec::new())),
+            "looks_hide" => out.push(Stmt::Rt(RtStmt::Hide, Vec::new())),
+            "looks_switchcostumeto" => {
+                let costume = self.input_raw(block, "COSTUME", Type::Str);
+                let costume = self.cast(costume, Type::Any);
+                out.push(Stmt::Rt(RtStmt::SwitchCostume, vec![costume]));
+            }
+            "looks_nextcostume" => out.push(Stmt::Rt(RtStmt::NextCostume, Vec::new())),
+            "looks_switchbackdropto" | "looks_switchbackdroptoandwait" => {
+                // Nothing waits yet: the hats a backdrop switch starts are not supported, so
+                // "and wait" has nothing to wait for.
+                let backdrop = self.input_raw(block, "BACKDROP", Type::Str);
+                let backdrop = self.cast(backdrop, Type::Any);
+                out.push(Stmt::Rt(RtStmt::SwitchBackdrop, vec![backdrop]));
+            }
+            "looks_nextbackdrop" => out.push(Stmt::Rt(RtStmt::NextBackdrop, Vec::new())),
+            "looks_changesizeby" => {
+                let change = self.input(block, "CHANGE", Type::Num);
+                out.push(Stmt::Rt(RtStmt::ChangeSize, vec![change]));
+            }
+            "looks_setsizeto" => {
+                let size = self.input(block, "SIZE", Type::Num);
+                out.push(Stmt::Rt(RtStmt::SetSize, vec![size]));
+            }
+            "looks_changeeffectby" | "looks_seteffectto" => {
+                let name = field_value(block, "EFFECT").unwrap_or_default().to_lowercase();
+                let (input, make): (&str, fn(Effect) -> RtStmt) = if block.opcode == "looks_seteffectto" {
+                    ("VALUE", RtStmt::SetEffect)
+                } else {
+                    ("CHANGE", RtStmt::ChangeEffect)
+                };
+                let value = self.input(block, input, Type::Num);
+                // An unknown effect does nothing in scratch-vm.
+                if let Some(effect) = effect_by_name(&name) {
+                    out.push(Stmt::Rt(make(effect), vec![value]));
+                }
+            }
+            "looks_cleargraphiceffects" => out.push(Stmt::Rt(RtStmt::ClearEffects, Vec::new())),
+            "looks_gotofrontback" => {
+                let front = field_value(block, "FRONT_BACK").unwrap_or_default() == "front";
+                out.push(Stmt::Rt(RtStmt::GoToLayer(front), Vec::new()));
+            }
+            "looks_goforwardbackwardlayers" => {
+                let mut n = self.input(block, "NUM", Type::Num);
+                if field_value(block, "FORWARD_BACKWARD").unwrap_or_default() != "forward" {
+                    n = Expr::Binary(BinOp::Sub, Box::new(Expr::Num(0.0)), Box::new(n));
+                }
+                out.push(Stmt::Rt(RtStmt::GoLayers, vec![n]));
+            }
             op => self.warn(id, format!("block {op} is not supported yet; it does nothing")),
         }
     }
@@ -807,6 +949,34 @@ impl<'a> Lowerer<'a> {
                 let name = field_value(&block, "BROADCAST_OPTION").unwrap_or_default();
                 Expr::Str(self.program.intern(&name))
             }
+            "motion_xposition" => Expr::Rt(RtExpr::SpriteX, Vec::new()),
+            "motion_yposition" => Expr::Rt(RtExpr::SpriteY, Vec::new()),
+            "motion_direction" => Expr::Rt(RtExpr::SpriteDirection, Vec::new()),
+            "looks_size" => Expr::Rt(RtExpr::SpriteSize, Vec::new()),
+            "looks_costumenumbername" | "looks_backdropnumbername" => {
+                let number = field_value(&block, "NUMBER_NAME").unwrap_or_default() == "number";
+                let rt = match (block.opcode == "looks_costumenumbername", number) {
+                    (true, true) => RtExpr::CostumeNumber,
+                    (true, false) => RtExpr::CostumeName,
+                    (false, true) => RtExpr::BackdropNumber,
+                    (false, false) => RtExpr::BackdropName,
+                };
+                Expr::Rt(rt, Vec::new())
+            }
+            "sensing_of" => {
+                let property = field_value(&block, "PROPERTY").unwrap_or_default();
+                let property = Expr::Str(self.program.intern(&property));
+                let object = self.input(&block, "OBJECT", Type::Str);
+                Expr::Rt(RtExpr::PropertyOf, vec![property, object])
+            }
+            // Menus: their one field is the value.
+            "motion_goto_menu" | "motion_glideto_menu" => self.menu(&block, "TO"),
+            "motion_pointtowards_menu" => self.menu(&block, "TOWARDS"),
+            "looks_costume" => self.menu(&block, "COSTUME"),
+            "looks_backdrops" => self.menu(&block, "BACKDROP"),
+            "sensing_of_object_menu" => self.menu(&block, "OBJECT"),
+            // Legacy reporters scratch-vm keeps as no-ops that report nothing.
+            "motion_xscroll" | "motion_yscroll" => Expr::Num(0.0),
             op => {
                 self.warn(id, format!("reporter {op} is not supported yet; it reports 0"));
                 Expr::Num(0.0)
@@ -823,6 +993,12 @@ impl<'a> Lowerer<'a> {
 
     fn broadcast_input(&mut self, block: &Block) -> Expr {
         self.input(block, "BROADCAST_INPUT", Type::Str)
+    }
+
+    /// The value of a menu block's field, as a string.
+    fn menu(&mut self, block: &Block, field: &str) -> Expr {
+        let value = field_value(block, field).unwrap_or_default();
+        Expr::Str(self.program.intern(&value))
     }
 
     fn variable(&mut self, block: &Block) -> VarRef {
@@ -871,6 +1047,20 @@ fn may_be_nan(e: &Expr) -> bool {
     }
 }
 
+/// The graphic effect a lowercased `EFFECT` field names.
+fn effect_by_name(name: &str) -> Option<Effect> {
+    Some(match name {
+        "color" => Effect::Color,
+        "fisheye" => Effect::Fisheye,
+        "whirl" => Effect::Whirl,
+        "pixelate" => Effect::Pixelate,
+        "mosaic" => Effect::Mosaic,
+        "brightness" => Effect::Brightness,
+        "ghost" => Effect::Ghost,
+        _ => return None,
+    })
+}
+
 fn var_ref(on_stage_from_sprite: bool, v: &VarInfo) -> VarRef {
     match (on_stage_from_sprite, v.numeric) {
         (true, true) => VarRef::StageNum(v.index),
@@ -916,12 +1106,61 @@ mod tests {
     fn unsupported_blocks_warn() {
         let p = project(
             r#"{"h":{"opcode":"event_whenflagclicked","next":"m","parent":null,"inputs":{},"fields":{},"topLevel":true},
-            "m":{"opcode":"motion_movesteps","next":null,"parent":"h","inputs":{"STEPS":[1,[4,"10"]]},"fields":{},"topLevel":false}}"#,
+            "m":{"opcode":"pen_down","next":null,"parent":"h","inputs":{},"fields":{},"topLevel":false}}"#,
             "{}",
         );
         let lowered = lower(&p).unwrap();
         assert_eq!(lowered.warnings.len(), 1);
-        assert!(lowered.warnings[0].message.contains("motion_movesteps"));
+        assert!(lowered.warnings[0].message.contains("pen_down"));
+    }
+
+    #[test]
+    fn sprite_state_comes_from_the_project() {
+        let json = r#"{"targets":[{"isStage":true,"name":"Stage","costumes":[{"name":"b1"},{"name":"b2"}],"currentCostume":5},
+            {"isStage":false,"name":"Cat","blocks":{},"layerOrder":1,"x":1,"y":2,"direction":270,"size":50,
+             "visible":false,"rotationStyle":"left-right","draggable":true,"volume":40,"costumes":[{"name":"a"}]}]}"#;
+        let p = Project::from_json(json).unwrap();
+        let lowered = lower(&p).unwrap();
+        let stage = &lowered.program.targets[0];
+        assert_eq!(stage.costumes, ["b1", "b2"]);
+        assert_eq!(stage.state.costume, 1, "the costume index is clamped");
+        let cat = &lowered.program.targets[1];
+        assert_eq!(cat.costumes, ["a"]);
+        let s = &cat.state;
+        assert_eq!((s.x, s.y, s.direction, s.size, s.volume), (1.0, 2.0, -90.0, 50.0, 40.0));
+        assert!(!s.visible);
+        assert!(s.draggable);
+        assert_eq!(s.rotation_style, RotationStyle::LeftRight);
+    }
+
+    #[test]
+    fn motion_and_looks_blocks_lower() {
+        let p = project(
+            r#"{"h":{"opcode":"event_whenflagclicked","next":"m","parent":null,"inputs":{},"fields":{},"topLevel":true},
+            "m":{"opcode":"motion_turnleft","next":"g","parent":"h","inputs":{"DEGREES":[1,[4,"15"]]},"fields":{},"topLevel":false},
+            "g":{"opcode":"motion_goto","next":"c","parent":"m","inputs":{"TO":[1,"gm"]},"fields":{},"topLevel":false},
+            "gm":{"opcode":"motion_goto_menu","next":null,"parent":"g","inputs":{},"fields":{"TO":["_random_",null]},"shadow":true,"topLevel":false},
+            "c":{"opcode":"looks_switchcostumeto","next":"e","parent":"g","inputs":{"COSTUME":[1,"cm"]},"fields":{},"topLevel":false},
+            "cm":{"opcode":"looks_costume","next":null,"parent":"c","inputs":{},"fields":{"COSTUME":["costume2",null]},"shadow":true,"topLevel":false},
+            "e":{"opcode":"looks_seteffectto","next":"s","parent":"c","inputs":{"VALUE":[1,[4,"25"]]},"fields":{"EFFECT":["GHOST",null]},"topLevel":false},
+            "s":{"opcode":"looks_say","next":null,"parent":"e","inputs":{"MESSAGE":[3,"of",[10,""]]},"fields":{},"topLevel":false},
+            "of":{"opcode":"sensing_of","next":null,"parent":"s","inputs":{"OBJECT":[1,"om"]},"fields":{"PROPERTY":["x position",null]},"topLevel":false},
+            "om":{"opcode":"sensing_of_object_menu","next":null,"parent":"of","inputs":{},"fields":{"OBJECT":["Cat",null]},"shadow":true,"topLevel":false}}"#,
+            "{}",
+        );
+        let lowered = lower(&p).unwrap();
+        assert!(lowered.warnings.is_empty(), "{:?}", lowered.warnings);
+        let body = &lowered.program.functions[0].body;
+        assert_eq!(
+            body[0],
+            Stmt::Rt(RtStmt::Turn, vec![Expr::Binary(BinOp::Sub, Box::new(Expr::Num(0.0)), Box::new(Expr::Num(15.0)))])
+        );
+        assert!(matches!(&body[1], Stmt::Rt(RtStmt::GoTo, args) if matches!(args[0], Expr::Str(_))));
+        assert!(
+            matches!(&body[2], Stmt::Rt(RtStmt::SwitchCostume, args) if matches!(args[0], Expr::Cast(Type::Any, _)))
+        );
+        assert_eq!(body[3], Stmt::Rt(RtStmt::SetEffect(Effect::Ghost), vec![Expr::Num(25.0)]));
+        assert!(matches!(&body[4], Stmt::Rt(RtStmt::Say, args) if matches!(&args[0], Expr::Rt(RtExpr::PropertyOf, _))));
     }
 
     /// A chain of `+` reporters nested `depth` deep under a `say`.

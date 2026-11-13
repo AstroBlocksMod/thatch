@@ -9,7 +9,7 @@ The ABI is versioned (`ABI_VERSION`). Every change to a function or a layout bum
 ## What a program exports
 
 `thatch_program_init(runtime)`
-: Called once by the host. The program registers its string constants (`thatch_add_const`), its targets (`thatch_add_target`), their variables (`thatch_add_num_var`, `thatch_add_any_var`) and its scripts (`thatch_add_script`, with a hat kind, an argument such as a broadcast name, and the script's function pointer).
+: Called once by the host. The program registers its string constants (`thatch_add_const`), its targets (`thatch_add_target`), their costumes by name (`thatch_add_costume`), how each starts out on the stage (`thatch_set_sprite`: position, direction, size, costume, visibility, rotation style, draggability and volume), their variables (`thatch_add_num_var`, `thatch_add_any_var`) and its scripts (`thatch_add_script`, with a hat kind, an argument such as a broadcast name, and the script's function pointer).
 
 `thatch_program_abi_version()`
 : Returns the `ABI_VERSION` the program was compiled against, as an `int32_t`. A host calls it before `thatch_program_init`.
@@ -53,21 +53,34 @@ Arithmetic
 Control
 : `thatch_yield`, `thatch_wait`, `thatch_say`, `thatch_say_for`, `thatch_broadcast`, `thatch_broadcast_wait`, `thatch_stop_all`, `thatch_stop_others`, `thatch_proc_enter` and `thatch_proc_exit`. After each of these that can yield, generated code checks `ThreadCtx::killed`.
 
+Motion
+: `thatch_move_steps`, `thatch_go_to_xy`, `thatch_go_to` (a sprite name, `_mouse_` or `_random_`), `thatch_set_x`, `thatch_set_y`, `thatch_change_x`, `thatch_change_y`, `thatch_turn`, `thatch_point_in_direction`, `thatch_point_towards`, `thatch_glide` and `thatch_glide_to` (which yield until the time is up), `thatch_bounce`, `thatch_set_rotation_style`, and the reporters `thatch_sprite_x`, `thatch_sprite_y` and `thatch_sprite_direction`.
+
+Looks
+: `thatch_set_visible`, `thatch_switch_costume` and `thatch_switch_backdrop` (with a dynamically typed value: a number is a costume number, a string a name first), `thatch_next_costume`, `thatch_next_backdrop`, `thatch_set_size`, `thatch_change_size`, `thatch_set_effect`, `thatch_change_effect`, `thatch_clear_effects`, `thatch_go_to_layer`, `thatch_go_layers`, and the reporters `thatch_sprite_size`, `thatch_costume_number`, `thatch_costume_name` and `thatch_property_of`, which writes the `property of object` value into a slot the caller owns.
+
 ## Writing a host
 
-A host owns the window, the clock and the frame loop. The runtime owns everything Scratch: targets, variables, strings, threads and the scheduler. They meet in `thatch.h`.
+A host owns the window, the clock and the frame loop. The runtime owns everything Scratch: targets, variables, strings, threads, the scheduler, and the state of every sprite: position, direction, size, costume, visibility, graphic effects and layer order. The host draws what the runtime describes. They meet in `thatch.h`.
 
 The host fills in a `ThatchHost` table and hands it to the runtime:
 
 ```c
 typedef struct ThatchHost {
-    void *data;          /* passed back to every callback */
-    ThatchSayFn say;     /* a target said or thought something; empty text clears the bubble */
-    ThatchNowFn now_ms;  /* the clock wait and timer read; NULL for the virtual clock */
+    void *data;                           /* passed back to every callback */
+    ThatchSayFn say;                      /* a target said or thought something; empty text clears the bubble */
+    ThatchNowFn now_ms;                   /* the clock wait and timer read; NULL for the virtual clock */
+    ThatchSpriteChangedFn sprite_changed; /* a target looks different now */
+    ThatchMeasureFn measure;              /* how big a sprite is drawn, for fencing, bouncing and size limits */
 } ThatchHost;
 ```
 
-A null callback means the host does not care. Without `now_ms` the runtime uses a virtual clock of one frame per thirtieth of a second, which is what makes the headless host's runs repeatable; a windowed host passes its real clock.
+Zero the struct first, so that callbacks added in later versions are null. A null callback means the host does not care. Without `now_ms` the runtime uses a virtual clock of one frame per thirtieth of a second, which is what makes the headless host's runs repeatable; a windowed host passes its real clock.
+
+The two sprite callbacks decide how much of scratch-vm's renderer behavior the runtime reproduces, because scratch-vm itself behaves differently with and without one:
+
+- `sprite_changed` says the host draws. The runtime calls it whenever a target's position, direction, size, costume, visibility, effects or layer changes, and, as scratch-vm does with a renderer, a change to a visible sprite also requests a redraw, which ends the frame early so that `move 10 steps` in a `forever` loop moves once per frame. Without it, motion requests no redraw, which is what the headless host wants, since the samples are checked against scratch-vm without a renderer.
+- `measure` answers `THATCH_MEASURE_BOUNDS` (the tight bounds of the sprite as drawn), `THATCH_MEASURE_BOX` (its axis-aligned bounding box) and `THATCH_MEASURE_COSTUME_SIZE` (the costume's unscaled width and height), all in Scratch coordinates, with the state the sprite has at the time of the call. With it, the runtime fences every move so that at least 15 pixels of the sprite stay on the stage, makes `if on edge, bounce` work and clamps sizes between 5 pixels and one and a half stages, exactly as scratch-render does. Without it, nothing is fenced, bounce does nothing and `set size` stores the number as given.
 
 A callback may ask the runtime about its state, as the headless host asks for the target's name in `say`. `say` gets the runtime pointer for that, and a host that wants it in `now_ms` can keep it in `data`. A callback must not run a frame, load, start or stop anything, or destroy the runtime.
 
@@ -79,11 +92,13 @@ flowchart TD
     load --> flag["thatch_runtime_green_flag(rt)"]
     flag --> frame["thatch_runtime_frame(rt)"]
     frame --> redraw{"thatch_runtime_redraw_requested(rt)?"}
-    redraw -->|yes| draw["draw the stage"] --> more
+    redraw -->|yes| draw["thatch_runtime_draw_order, then thatch_runtime_sprite for each target, and draw"] --> more
     redraw -->|no| more{"thatch_runtime_has_threads(rt)?"}
     more -->|yes| frame
     more -->|no| destroy["thatch_runtime_destroy(rt)"]
 ```
+
+To draw, a host asks `thatch_runtime_draw_order` for the targets back to front (the stage first) and `thatch_runtime_sprite` for each one's `ThatchSprite`: position, direction and rotation style, size in percent, costume index (into the costumes the program registered, whose names `thatch_runtime_costume_count` and `thatch_runtime_costume_name` give back), visibility and the seven graphic effects in Scratch's order. The runtime keeps the direction as Scratch shows it, from -179 to 180 with 90 pointing right; the host applies the rotation style when it draws, as scratch-vm's renderer does.
 
 `thatch_runtime_create` takes the ABI version the host was compiled with and returns null for any other, since a host built against another header passes a `ThatchHost` of another size. `thatch_runtime_load` returns `THATCH_LOAD_WRONG_ABI_VERSION` or `THATCH_LOAD_NO_STAGE` instead of `THATCH_LOAD_OK` when the program cannot run, and leaves the runtime as empty as it was created. A runtime holds one program, so a second load returns `THATCH_LOAD_ALREADY_LOADED` and changes nothing. `thatch_runtime_frame` returns nonzero after an error that `thatch_runtime_last_error` describes, after which the runtime may only be destroyed. `thatch_runtime_target_count`, `thatch_runtime_target_name` and `thatch_runtime_target_is_stage` describe the program's targets, so the `say` callback can name the sprite. A callback may call these and the other `thatch_runtime_*` functions that only read. Nothing is thread-safe: one runtime belongs to one thread, and the host may only call into it between frames and from its callbacks.
 
@@ -91,6 +106,6 @@ flowchart TD
 
 `thatch_runtime_green_flag` does what clicking the green flag does: it stops every script and clears every bubble first, then resets the timer and starts the green flag scripts. `thatch_runtime_has_threads` counts only scripts that can still run, not ones a stop has killed but the next frame has yet to finish.
 
-The headless host in `thatch-runtime` is the reference implementation and uses nothing but this API, so every sample run exercises it. A host written in C or C++ such as Scratch Everywhere! implements the same table; what it still lacks is sprite state (position, costume, effects) and the input, pen and sound callbacks, which are the next steps on the [roadmap](roadmap.md). Scratch Everywhere! is LGPL-3.0, so its host lives in a separate repository; nothing from it is part of this one.
+The headless host in `thatch-runtime` is the reference implementation and uses nothing but this API, so every sample run exercises it; `crates/thatch-cli/tests/host_api.rs` plays a host that draws and checks the fencing and clamping. A host written in C or C++ such as Scratch Everywhere! implements the same table; what it still lacks is input, pen and sound, which are the next steps on the [roadmap](roadmap.md). Scratch Everywhere! is LGPL-3.0, so its host lives in a separate repository; nothing from it is part of this one.
 
 The header is generated from `thatch-abi` by `cargo test -p thatch-abi` with `THATCH_UPDATE_HEADER=1` set, and a test fails when it is out of date.

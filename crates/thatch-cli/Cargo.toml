@@ -19,5 +19,8 @@ thatch-runtime.workspace = true
 thatch-sb3.workspace = true
 thatch-scratch.workspace = true
 
+[dev-dependencies]
+thatch-abi.workspace = true
+
 [lints]
 workspace = true

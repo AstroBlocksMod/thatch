@@ -8,10 +8,14 @@ str 2 = " "
 str 3 = "other script sees i = "
 str 4 = "other script done"
 target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["backdrop1"]
   num 0 "i" = 0
   num 1 "sum" = 0
   any 0 "text" = Str(StrId(0))
 target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
   script FlagClicked -> fn 1
   script FlagClicked -> fn 2
 fn 0 "Cat/sum up to %s"(n: num) warp

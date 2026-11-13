@@ -12,8 +12,12 @@ str 6 = "timer passed 0.2"
 str 7 = "0.1"
 str 8 = "stopping everything"
 target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["backdrop1"]
   num 0 "ticks" = 0
 target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
   script FlagClicked -> fn 0
   script FlagClicked -> fn 1
   script FlagClicked -> fn 2

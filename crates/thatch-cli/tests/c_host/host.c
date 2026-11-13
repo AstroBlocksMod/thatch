@@ -40,9 +40,10 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    host.data = NULL;
+    memset(&host, 0, sizeof host); /* every callback null, including ones added after this was written */
     host.say = say;
-    host.now_ms = NULL; /* the virtual clock, so the output is repeatable */
+    host.now_ms = NULL;      /* the virtual clock, so the output is repeatable */
+    host.sprite_changed = NULL; /* this host does not draw, so motion requests no redraw, as in the oracle */
 
     rt = thatch_runtime_create(THATCH_ABI_VERSION, &host, 1);
     if (rt == NULL) {

@@ -1,0 +1,44 @@
+Cat says: 10,20
+Cat says: 15,-10
+Cat says: -7.5,3
+Cat says: 2.5,3
+Cat says: 90
+Cat says: 180
+Cat says: -90
+Cat says: -135
+Cat says: 180
+Cat says: 180
+Cat says: -179
+Cat says: 0
+Cat says: 0,10
+Cat says: 0,0
+Cat says: -20,0
+Cat says: 67.38
+Cat says: 67.38
+Cat says: 100,50
+Cat says: 100,50
+Cat says: 0,0
+Cat says: 50,60
+Cat says: 100,50
+Cat says: 100,50
+Cat says: 0,50
+Cat says: 0,50
+Dog says: x position of Cat: 0
+Dog says: y position of Cat: 50
+Dog says: direction of Cat: 67.38013505195957
+Dog says: costume # of Cat: 1
+Dog says: costume name of Cat: cat-a
+Dog says: size of Cat: 100
+Dog says: volume of Cat: 60
+Dog says: score of Cat: 42
+Dog says: word of Cat: hello
+Dog says: missing of Cat: 0
+Dog says: x position of Nobody: 0
+Dog says: backdrop # of _stage_: 2
+Dog says: backdrop name of _stage_: night
+Dog says: volume of _stage_: 100
+Dog says: x position of _stage_: 0
+Dog says: direction of Dog: -45
+Dog says: size of Dog: 150
+Dog says: costume name of Dog: dog-c
+Dog says: Dog at 100,50

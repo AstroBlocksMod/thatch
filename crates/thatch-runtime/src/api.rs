@@ -1,15 +1,22 @@
 //! The C ABI surface: the `thatch_*` functions generated code calls, whose signatures match
 //! `thatch_abi::RT_FNS`, and the `thatch_runtime_*` functions hosts call, which match
 //! `thatch_abi::HOST_API`. Tests below check both lists.
+//!
+//! Every function here is `unsafe` because it takes raw pointers from C. Their contracts are the
+//! ones `thatch_abi` documents for the C header: a `ThatchRuntime *` from `thatch_runtime_create`
+//! used between frames on one thread, a `ThreadCtx *` of the running thread, live string handles
+//! and value pointers, and buffers of the stated size.
+#![allow(clippy::missing_safety_doc)]
 
 use std::ffi::c_char;
 use std::rc::Rc;
 use std::slice;
 
-use thatch_abi::{Host, OpaqueRuntime, TAG_NUM, ThreadCtx, Value};
+use thatch_abi::{Host, OpaqueRuntime, Sprite, TAG_NUM, TAG_STR, ThreadCtx, Value};
 use thatch_values::{MathOp, ValueRef};
 
 use crate::scheduler::{Rt, Runtime};
+use crate::sprite::PropertyValue;
 use crate::strings::{self, Handle};
 use crate::thread::{Frame, ScriptFn, ThreadInner, Yield};
 use crate::value::{self, VarSlot};
@@ -26,6 +33,8 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
         thatch_add_num_var,
         thatch_add_any_var,
         thatch_add_script,
+        thatch_add_costume,
+        thatch_set_sprite,
         thatch_main,
         thatch_temps_clear,
         thatch_num_to_str,
@@ -63,6 +72,39 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
         thatch_stop_others,
         thatch_proc_enter,
         thatch_proc_exit,
+        thatch_move_steps,
+        thatch_go_to_xy,
+        thatch_go_to,
+        thatch_set_x,
+        thatch_set_y,
+        thatch_change_x,
+        thatch_change_y,
+        thatch_turn,
+        thatch_point_in_direction,
+        thatch_point_towards,
+        thatch_glide,
+        thatch_glide_to,
+        thatch_bounce,
+        thatch_set_rotation_style,
+        thatch_sprite_x,
+        thatch_sprite_y,
+        thatch_sprite_direction,
+        thatch_set_visible,
+        thatch_switch_costume,
+        thatch_next_costume,
+        thatch_switch_backdrop,
+        thatch_next_backdrop,
+        thatch_set_size,
+        thatch_change_size,
+        thatch_set_effect,
+        thatch_change_effect,
+        thatch_clear_effects,
+        thatch_go_to_layer,
+        thatch_go_layers,
+        thatch_sprite_size,
+        thatch_costume_number,
+        thatch_costume_name,
+        thatch_property_of,
     ]
 }
 
@@ -81,6 +123,10 @@ pub fn host_symbols() -> Vec<(&'static str, *const u8)> {
         thatch_runtime_target_count,
         thatch_runtime_target_name,
         thatch_runtime_target_is_stage,
+        thatch_runtime_sprite,
+        thatch_runtime_draw_order,
+        thatch_runtime_costume_count,
+        thatch_runtime_costume_name,
         thatch_runtime_last_error,
         thatch_runtime_destroy,
     ]
@@ -97,8 +143,11 @@ pub unsafe extern "C" fn thatch_runtime_create(abi_version: i32, host: *const Ho
         return std::ptr::null_mut();
     }
     // SAFETY: the host passes its own table of this version, or null for no callbacks at all.
-    let host =
-        if host.is_null() { Host { data: std::ptr::null_mut(), say: None, now_ms: None } } else { unsafe { *host } };
+    let host = if host.is_null() {
+        Host { data: std::ptr::null_mut(), say: None, now_ms: None, sprite_changed: None, measure: None }
+    } else {
+        unsafe { *host }
+    };
     Runtime::create(host, seed).cast::<OpaqueRuntime>()
 }
 
@@ -232,6 +281,67 @@ pub unsafe extern "C" fn thatch_runtime_target_is_stage(rt: *const OpaqueRuntime
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_sprite(rt: *const OpaqueRuntime, target: i64, out: *mut Sprite) -> i8 {
+    // SAFETY: as `thatch_runtime_green_flag`; `out` is the host's to write.
+    unsafe {
+        let r = &*rt.cast::<Runtime>();
+        let sprite = usize::try_from(target).ok().and_then(|i| r.sprite(i));
+        match sprite {
+            Some(s) if !out.is_null() => {
+                *out = s;
+                1
+            }
+            _ => 0,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_draw_order(rt: *const OpaqueRuntime, targets: *mut i64, cap: usize) -> usize {
+    // SAFETY: as `thatch_runtime_green_flag`; `targets` holds `cap` entries the host owns.
+    unsafe {
+        let r = &*rt.cast::<Runtime>();
+        if !targets.is_null() {
+            for (i, t) in r.order.iter().take(cap).enumerate() {
+                *targets.add(i) = *t as i64;
+            }
+        }
+        r.order.len()
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_costume_count(rt: *const OpaqueRuntime, target: i64) -> i64 {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe {
+        let r = &*rt.cast::<Runtime>();
+        let t = usize::try_from(target).ok().and_then(|i| r.targets.get(i));
+        t.map_or(0, |t| t.costumes.len() as i64)
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_costume_name(
+    rt: *const OpaqueRuntime,
+    target: i64,
+    costume: i64,
+    len: *mut usize,
+) -> *const c_char {
+    // SAFETY: as `thatch_runtime_target_name`.
+    unsafe {
+        let r = &*rt.cast::<Runtime>();
+        let name = usize::try_from(target)
+            .ok()
+            .and_then(|i| r.targets.get(i))
+            .and_then(|t| usize::try_from(costume).ok().and_then(|c| t.costumes.get(c)));
+        if !len.is_null() {
+            *len = name.map_or(0, |n| n.len());
+        }
+        name.map_or(std::ptr::null(), |n| n.as_ptr().cast::<c_char>())
+    }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn thatch_runtime_last_error(rt: *const OpaqueRuntime, len: *mut usize) -> *const c_char {
     // SAFETY: as `thatch_runtime_target_name`.
     unsafe {
@@ -345,6 +455,44 @@ pub unsafe extern "C" fn thatch_add_script(
     unsafe {
         let func: ScriptFn = std::mem::transmute::<usize, ScriptFn>(func as usize);
         (*rt).add_script(target as usize, hat, text(arg, arg_len).to_owned(), func);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_add_costume(rt: *mut Runtime, target: i64, name: *const u8, len: i64) {
+    // SAFETY: as `thatch_add_const`.
+    unsafe { (*rt).add_costume(target as usize, text(name, len).to_owned()) }
+}
+
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn thatch_set_sprite(
+    rt: *mut Runtime,
+    target: i64,
+    x: f64,
+    y: f64,
+    direction: f64,
+    size: f64,
+    costume: i64,
+    visible: i8,
+    rotation_style: i64,
+    draggable: i8,
+    volume: f64,
+) {
+    // SAFETY: as `thatch_add_const`.
+    unsafe {
+        (*rt).set_sprite(
+            target as usize,
+            x,
+            y,
+            direction,
+            size,
+            costume,
+            visible != 0,
+            rotation_style,
+            draggable != 0,
+            volume,
+        );
     }
 }
 
@@ -575,13 +723,13 @@ pub unsafe extern "C" fn thatch_yield(ctx: *mut ThreadCtx) {
     unsafe { inner(ctx).loop_yield() }
 }
 
-/// Waits for the next frame until `end_ms` on the virtual clock. Returns false when the thread was
-/// killed meanwhile.
-unsafe fn wait_until(ctx: *mut ThreadCtx, end_ms: f64) -> bool {
+/// Waits until `end_ms` on the host's clock, yielding `how` each time. Returns false when the
+/// thread was killed meanwhile.
+unsafe fn wait_until(ctx: *mut ThreadCtx, end_ms: f64, how: Yield) -> bool {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         loop {
-            inner(ctx).suspend(Yield::Tick);
+            inner(ctx).suspend(how);
             if inner(ctx).killed() {
                 return false;
             }
@@ -599,7 +747,9 @@ pub unsafe extern "C" fn thatch_wait(ctx: *mut ThreadCtx, secs: f64) {
         let duration = (1000.0 * thatch_values::num_to_number(secs)).max(0.0);
         let end = rt(ctx).now_ms() + duration;
         runtime(ctx).request_redraw();
-        wait_until(ctx, end);
+        // scratch-vm's `wait` yields (not for a tick), so it is stepped again in every pass of
+        // the frame and can end as soon as the clock allows.
+        wait_until(ctx, end, Yield::Wait);
     }
 }
 
@@ -633,7 +783,8 @@ pub unsafe extern "C" fn thatch_say_for(ctx: *mut ThreadCtx, message: *const Val
         let token = rt(ctx).say(target, text, think != 0);
         let duration = (1000.0 * thatch_values::num_to_number(secs)).max(0.0);
         let end = rt(ctx).now_ms() + duration;
-        if !wait_until(ctx, end) {
+        // scratch-vm waits on a promise that a timer resolves between frames.
+        if !wait_until(ctx, end, Yield::Tick) {
             return;
         }
         if runtime(ctx).bubble_token(target) == token {
@@ -664,7 +815,7 @@ pub unsafe extern "C" fn thatch_broadcast_wait(ctx: *mut ThreadCtx, name: Handle
                 return;
             }
             let all_tick = waiting.iter().all(|s| **s == crate::thread::Status::TickYield);
-            inner(ctx).suspend(if all_tick { Yield::Tick } else { Yield::Loop });
+            inner(ctx).suspend(if all_tick { Yield::Tick } else { Yield::Wait });
             if inner(ctx).killed() {
                 return;
             }
@@ -713,6 +864,362 @@ pub unsafe extern "C" fn thatch_proc_exit(ctx: *mut ThreadCtx, warp: i8) {
         if warp != 0 {
             inner.exit_warp();
         }
+    }
+}
+
+// ---- motion -----------------------------------------------------------------------------------
+
+/// The index of the thread's target.
+unsafe fn target_of(ctx: *mut ThreadCtx) -> usize {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe { inner(ctx).target }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_move_steps(ctx: *mut ThreadCtx, steps: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).move_steps(target, steps);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_go_to_xy(ctx: *mut ThreadCtx, x: f64, y: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).set_xy(target, x, y);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_go_to(ctx: *mut ThreadCtx, name: Handle) {
+    // SAFETY: as `thatch_str_to_num`.
+    unsafe {
+        let target = target_of(ctx);
+        let name = str_arg(name).to_owned();
+        runtime(ctx).go_to(target, &name);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_set_x(ctx: *mut ThreadCtx, x: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).set_x(target, x);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_set_y(ctx: *mut ThreadCtx, y: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).set_y(target, y);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_change_x(ctx: *mut ThreadCtx, dx: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).change_x(target, dx);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_change_y(ctx: *mut ThreadCtx, dy: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).change_y(target, dy);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_turn(ctx: *mut ThreadCtx, degrees: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        let direction = runtime(ctx).targets[target].direction + degrees;
+        runtime(ctx).set_direction(target, direction);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_point_in_direction(ctx: *mut ThreadCtx, direction: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).set_direction(target, direction);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_point_towards(ctx: *mut ThreadCtx, name: Handle) {
+    // SAFETY: as `thatch_str_to_num`.
+    unsafe {
+        let target = target_of(ctx);
+        let name = str_arg(name).to_owned();
+        runtime(ctx).point_towards(target, &name);
+    }
+}
+
+/// `glide`: moves a little every time the thread is stepped until the time is up, then lands on
+/// the end point. A duration of 0 or less lands at once without yielding.
+unsafe fn glide(ctx: *mut ThreadCtx, secs: f64, end_x: f64, end_y: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        let duration_ms = secs * 1000.0;
+        if secs <= 0.0 {
+            runtime(ctx).set_xy(target, end_x, end_y);
+            return;
+        }
+        let (start_x, start_y) = (runtime(ctx).targets[target].x, runtime(ctx).targets[target].y);
+        let started = rt(ctx).now_ms();
+        loop {
+            inner(ctx).suspend(Yield::Wait);
+            if inner(ctx).killed() {
+                return;
+            }
+            let elapsed = rt(ctx).now_ms() - started;
+            if elapsed < duration_ms {
+                let frac = elapsed / duration_ms;
+                let x = start_x + frac * (end_x - start_x);
+                let y = start_y + frac * (end_y - start_y);
+                runtime(ctx).set_xy(target, x, y);
+            } else {
+                runtime(ctx).set_xy(target, end_x, end_y);
+                return;
+            }
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_glide(ctx: *mut ThreadCtx, secs: f64, x: f64, y: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe { glide(ctx, secs, x, y) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_glide_to(ctx: *mut ThreadCtx, secs: f64, name: Handle) {
+    // SAFETY: as `thatch_str_to_num`.
+    unsafe {
+        let name = str_arg(name).to_owned();
+        if let Some((x, y)) = runtime(ctx).target_xy(&name) {
+            glide(ctx, secs, x, y);
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_bounce(ctx: *mut ThreadCtx) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).bounce(target);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_set_rotation_style(ctx: *mut ThreadCtx, style: i64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).set_rotation_style(target, style);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_sprite_x(ctx: *mut ThreadCtx) -> f64 {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe { thatch_values::limit_precision(runtime(ctx).targets[target_of(ctx)].x) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_sprite_y(ctx: *mut ThreadCtx) -> f64 {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe { thatch_values::limit_precision(runtime(ctx).targets[target_of(ctx)].y) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_sprite_direction(ctx: *mut ThreadCtx) -> f64 {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe { runtime(ctx).targets[target_of(ctx)].direction }
+}
+
+// ---- looks ------------------------------------------------------------------------------------
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_set_visible(ctx: *mut ThreadCtx, visible: i8) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).set_visible(target, visible != 0);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_switch_costume(ctx: *mut ThreadCtx, costume: *const Value) {
+    // SAFETY: as `thatch_any_to_num`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).switch_costume(target, value_arg(costume), false, false);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_next_costume(ctx: *mut ThreadCtx) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        let next = runtime(ctx).targets[target].costume as f64 + 1.0;
+        runtime(ctx).switch_costume(target, ValueRef::Num(next), false, true);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_switch_backdrop(ctx: *mut ThreadCtx, backdrop: *const Value) {
+    // SAFETY: as `thatch_any_to_num`.
+    unsafe {
+        let stage = runtime(ctx).stage_index();
+        runtime(ctx).switch_costume(stage, value_arg(backdrop), true, false);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_next_backdrop(ctx: *mut ThreadCtx) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let stage = runtime(ctx).stage_index();
+        let next = runtime(ctx).targets[stage].costume as f64 + 1.0;
+        runtime(ctx).switch_costume(stage, ValueRef::Num(next), true, true);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_set_size(ctx: *mut ThreadCtx, size: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).set_size(target, size);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_change_size(ctx: *mut ThreadCtx, change: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        let size = runtime(ctx).targets[target].size + change;
+        runtime(ctx).set_size(target, size);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_set_effect(ctx: *mut ThreadCtx, effect: i64, value: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).set_effect(target, usize::try_from(effect).unwrap_or(usize::MAX), value);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_change_effect(ctx: *mut ThreadCtx, effect: i64, change: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).change_effect(target, usize::try_from(effect).unwrap_or(usize::MAX), change);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_clear_effects(ctx: *mut ThreadCtx) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).clear_effects(target);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_go_to_layer(ctx: *mut ThreadCtx, front: i8) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).go_to_layer(target, front != 0);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_go_layers(ctx: *mut ThreadCtx, layers: f64) {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = target_of(ctx);
+        runtime(ctx).move_layer(target, layers);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_sprite_size(ctx: *mut ThreadCtx) -> f64 {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe { thatch_values::round(runtime(ctx).targets[target_of(ctx)].size) }
+}
+
+/// The target a costume reporter asks about: the stage for backdrops, else the thread's own.
+unsafe fn costume_target(ctx: *mut ThreadCtx, backdrop: i8) -> usize {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe { if backdrop != 0 { runtime(ctx).stage_index() } else { target_of(ctx) } }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_costume_number(ctx: *mut ThreadCtx, backdrop: i8) -> f64 {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = costume_target(ctx, backdrop);
+        runtime(ctx).targets[target].costume as f64 + 1.0
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_costume_name(ctx: *mut ThreadCtx, backdrop: i8) -> Handle {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe {
+        let target = costume_target(ctx, backdrop);
+        let name = runtime(ctx).costume_name(target);
+        let h = strings::handle_of(&name);
+        inner(ctx).temps.push(name);
+        h
+    }
+}
+
+/// `property of object`: writes the value into `out`, a slot on the caller's stack, keeping any
+/// string alive for the statement.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_property_of(ctx: *mut ThreadCtx, out: *mut Value, property: Handle, object: Handle) {
+    // SAFETY: as `thatch_str_to_num`; `out` is a writable slot of the running thread.
+    unsafe {
+        let value = runtime(ctx).property_of(str_arg(property), str_arg(object));
+        *out = match value {
+            PropertyValue::Num(n) => value::num(n),
+            PropertyValue::Str(s) => {
+                let h = strings::handle_of(&s);
+                inner(ctx).temps.push(s);
+                Value { tag: TAG_STR, bits: h as u64 }
+            }
+            PropertyValue::Var(v) => {
+                if v.tag == TAG_STR {
+                    inner(ctx).temps.push(strings::retain(v.bits as Handle));
+                }
+                v
+            }
+        };
     }
 }
 
