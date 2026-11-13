@@ -23,7 +23,7 @@ The headless host stays as the reference the samples check against, since Scratc
 
 - [x] A host table in the ABI and a C header for hosts: a host creates the runtime with its callbacks (`say`, the clock), loads the program and steps frames; the headless host is its first implementation
 - [x] Sprite state in the runtime (position, direction, size, costume, visibility, effects, layer) and the motion and looks blocks lowered against it, testable headless through the sensing reporters, with a callback that tells the host what to draw
-- [ ] Input in the host table: keys, mouse, clicks, and the hats they start
+- [x] Input in the host table: keys, mouse, clicks, and the hats they start
 - [ ] The Scratch Everywhere! host in its own repository: submodule, hook patch and adapter, built with their JIT and DECtalk off (the JIT starts background threads, and DECtalk's license is unclear); Linux first, then macOS and Windows
 - [ ] `thatch build --host scratch-everywhere`: links the game against the shared library and writes the license notices next to it
 - [ ] Variables synced to Scratch Everywhere!'s copies so its monitors show them

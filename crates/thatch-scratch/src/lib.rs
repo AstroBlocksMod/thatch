@@ -336,6 +336,20 @@ impl<'a> Lowerer<'a> {
                     let func = self.lower_script(&block, format!("{}/receive {}", target.name, name));
                     scripts.push(Script { hat: Hat::BroadcastReceived(name), func });
                 }
+                "event_whenkeypressed" => {
+                    let key = field_value(&block, "KEY_OPTION").unwrap_or_default();
+                    let func = self.lower_script(&block, format!("{}/key {}", target.name, key));
+                    scripts.push(Script { hat: Hat::KeyPressed(key), func });
+                }
+                "event_whenthisspriteclicked" | "event_whenstageclicked" => {
+                    let func = self.lower_script(&block, format!("{}/clicked {}", target.name, id));
+                    let hat = if block.opcode == "event_whenthisspriteclicked" {
+                        Hat::SpriteClicked
+                    } else {
+                        Hat::StageClicked
+                    };
+                    scripts.push(Script { hat, func });
+                }
                 "procedures_definition" => {
                     if let Some(pi) = self.types.procs[ti].iter().position(|p| p.definition == id) {
                         self.lower_procedure(pi);
@@ -621,7 +635,7 @@ impl<'a> Lowerer<'a> {
             "looks_show" => out.push(Stmt::Rt(RtStmt::Show, Vec::new())),
             "looks_hide" => out.push(Stmt::Rt(RtStmt::Hide, Vec::new())),
             "looks_switchcostumeto" => {
-                let costume = self.input_raw(block, "COSTUME", Type::Str);
+                let costume = self.input_text(block, "COSTUME");
                 let costume = self.cast(costume, Type::Any);
                 out.push(Stmt::Rt(RtStmt::SwitchCostume, vec![costume]));
             }
@@ -629,7 +643,7 @@ impl<'a> Lowerer<'a> {
             "looks_switchbackdropto" | "looks_switchbackdroptoandwait" => {
                 // Nothing waits yet: the hats a backdrop switch starts are not supported, so
                 // "and wait" has nothing to wait for.
-                let backdrop = self.input_raw(block, "BACKDROP", Type::Str);
+                let backdrop = self.input_text(block, "BACKDROP");
                 let backdrop = self.cast(backdrop, Type::Any);
                 out.push(Stmt::Rt(RtStmt::SwitchBackdrop, vec![backdrop]));
             }
@@ -975,6 +989,15 @@ impl<'a> Lowerer<'a> {
             "looks_costume" => self.menu(&block, "COSTUME"),
             "looks_backdrops" => self.menu(&block, "BACKDROP"),
             "sensing_of_object_menu" => self.menu(&block, "OBJECT"),
+            "sensing_keyoptions" => self.menu(&block, "KEY_OPTION"),
+            "sensing_mousex" => Expr::Rt(RtExpr::MouseX, Vec::new()),
+            "sensing_mousey" => Expr::Rt(RtExpr::MouseY, Vec::new()),
+            "sensing_mousedown" => Expr::Rt(RtExpr::MouseDown, Vec::new()),
+            "sensing_keypressed" => {
+                let key = self.input_text(&block, "KEY_OPTION");
+                let key = self.cast(key, Type::Any);
+                Expr::Rt(RtExpr::KeyPressed, vec![key])
+            }
             // Legacy reporters scratch-vm keeps as no-ops that report nothing.
             "motion_xscroll" | "motion_yscroll" => Expr::Num(0.0),
             op => {
@@ -993,6 +1016,17 @@ impl<'a> Lowerer<'a> {
 
     fn broadcast_input(&mut self, block: &Block) -> Expr {
         self.input(block, "BROADCAST_INPUT", Type::Str)
+    }
+
+    /// Lowers an input whose block asks whether its value is a number: `key pressed?` and the
+    /// costume and backdrop blocks treat a number and the same digits as text differently, and a
+    /// value typed into the project is always text to scratch-vm, so it stays text here.
+    fn input_text(&mut self, block: &Block, name: &str) -> Expr {
+        let raw = block.inputs.get(name).cloned().unwrap_or(serde_json::Value::Null);
+        if let Input::Primitive(Primitive::Text(s)) = parse_input(&raw) {
+            return Expr::Str(self.program.intern(&s));
+        }
+        self.input_raw(block, name, Type::Str)
     }
 
     /// The value of a menu block's field, as a string.
@@ -1042,7 +1076,7 @@ fn may_be_nan(e: &Expr) -> bool {
         Expr::Cast(Type::Num, _) => false,
         Expr::Unary(UnOp::ToNumber, _) => false,
         Expr::Unary(UnOp::Round | UnOp::Abs | UnOp::Floor | UnOp::Ceil, inner) => may_be_nan(inner),
-        Expr::Rt(RtExpr::Length | RtExpr::Timer, _) => false,
+        Expr::Rt(RtExpr::Length | RtExpr::Timer | RtExpr::MouseX | RtExpr::MouseY, _) => false,
         _ => true,
     }
 }

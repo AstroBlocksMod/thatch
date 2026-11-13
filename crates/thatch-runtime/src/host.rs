@@ -2,7 +2,8 @@
 //!
 //! It is the first implementation of the host table in `thatch_abi::Host`, and it goes through the
 //! same C API (`thatch_runtime_*` in `api.rs`) a host written in C would use, so running the samples
-//! exercises that surface too.
+//! exercises that surface too. It has no window, so its input comes from a script (see
+//! [`parse_input_script`]) that says which keys and mouse events happen before which frame.
 
 use std::ffi::{CStr, c_char, c_void};
 use std::io::Write;
@@ -15,12 +16,95 @@ use crate::api;
 
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
-    /// Stop after this many frames. The run also stops once no script is left.
+    /// Stop after this many frames. The run also stops once no script is left and no input is
+    /// still to come.
     pub frames: Option<u64>,
     /// Print the frame count and wall time to stderr.
     pub timing: bool,
     /// The seed of `pick random`. Random by default.
     pub seed: Option<u64>,
+    /// Input to feed the program, in frame order.
+    pub input: Vec<InputEvent>,
+}
+
+/// Something the player does.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Input {
+    /// A key goes down or up, named as the `when key pressed` menu names it.
+    Key { key: String, down: bool },
+    /// The mouse moves to a point in Scratch coordinates.
+    MouseMove { x: f64, y: f64 },
+    /// The mouse button goes down or up over the named target, or over the stage.
+    MouseButton { down: bool, target: Option<String> },
+}
+
+/// An input and the frame it happens before (the first frame is 0).
+#[derive(Debug, Clone, PartialEq)]
+pub struct InputEvent {
+    pub frame: u64,
+    pub input: Input,
+}
+
+/// Parses an input script: one event per line, starting with the number of the frame it happens
+/// before, blank lines and `#` comments allowed.
+///
+/// ```text
+/// 5 key down space
+/// 8 key up space
+/// 12 key down left arrow
+/// 20 mouse 100 -50
+/// 21 mouse down
+/// 25 mouse up Cat
+/// ```
+///
+/// `mouse down` and `mouse up` take the name of the target under the pointer; without one it is
+/// the stage, which is also what scratch-vm picks when it has no renderer.
+pub fn parse_input_script(text: &str) -> Result<Vec<InputEvent>, String> {
+    let mut events = Vec::new();
+    for (number, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let bad = |what: &str| format!("input line {}: {what}: {line:?}", number + 1);
+        let mut words = line.splitn(3, ' ');
+        let frame: u64 = words.next().and_then(|w| w.parse().ok()).ok_or_else(|| bad("expected a frame number"))?;
+        let kind = words.next().ok_or_else(|| bad("expected key or mouse after the frame"))?;
+        let rest = words.next().unwrap_or("").trim();
+        let input = match kind {
+            "key" => {
+                let (state, key) =
+                    rest.split_once(' ').ok_or_else(|| bad("expected `key down NAME` or `key up NAME`"))?;
+                let down = match state {
+                    "down" => true,
+                    "up" => false,
+                    _ => return Err(bad("expected down or up")),
+                };
+                Input::Key { key: key.trim().to_owned(), down }
+            }
+            "mouse" => {
+                let mut parts = rest.splitn(2, ' ');
+                match parts.next().unwrap_or("") {
+                    state @ ("down" | "up") => {
+                        let target = parts.next().map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned);
+                        Input::MouseButton { down: state == "down", target }
+                    }
+                    x => {
+                        let x: f64 = x.parse().map_err(|_| bad("expected `mouse X Y`, `mouse down` or `mouse up`"))?;
+                        let y: f64 = parts
+                            .next()
+                            .and_then(|y| y.trim().parse().ok())
+                            .ok_or_else(|| bad("expected `mouse X Y`"))?;
+                        Input::MouseMove { x, y }
+                    }
+                }
+            }
+            _ => return Err(bad("expected key or mouse after the frame")),
+        };
+        events.push(InputEvent { frame, input });
+    }
+    events.sort_by_key(|e| e.frame);
+    Ok(events)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -121,9 +205,15 @@ unsafe fn run_program(
         }
         let started = Instant::now();
         api::thatch_runtime_green_flag(rt);
-        while api::thatch_runtime_has_threads(rt) != 0 {
-            if options.frames.is_some_and(|max| api::thatch_runtime_frame_count(rt) >= max) {
+        let mut next_input = 0;
+        while api::thatch_runtime_has_threads(rt) != 0 || next_input < options.input.len() {
+            let frame = api::thatch_runtime_frame_count(rt);
+            if options.frames.is_some_and(|max| frame >= max) {
                 break;
+            }
+            while let Some(event) = options.input.get(next_input).filter(|e| e.frame <= frame) {
+                feed(rt, &event.input);
+                next_input += 1;
             }
             if api::thatch_runtime_frame(rt) != 0 {
                 let mut len = 0;
@@ -145,13 +235,48 @@ unsafe fn run_program(
     }
 }
 
-/// Parses the command line of a compiled program: `--frames N`, `--timing`, `--seed N`.
+/// Hands one input event to the runtime through the C API, as a host with a window would.
+///
+/// # Safety
+/// `rt` must come from `thatch_runtime_create`, between frames.
+unsafe fn feed(rt: *mut OpaqueRuntime, input: &Input) {
+    // SAFETY: forwarded from the caller.
+    unsafe {
+        match input {
+            Input::Key { key, down } => {
+                api::thatch_runtime_key(rt, key.as_ptr().cast::<c_char>(), key.len(), i8::from(*down));
+            }
+            Input::MouseMove { x, y } => api::thatch_runtime_mouse_move(rt, *x, *y),
+            Input::MouseButton { down, target } => {
+                let count = api::thatch_runtime_target_count(rt);
+                let index = (0..count).find(|i| match target {
+                    Some(name) => {
+                        let mut len = 0;
+                        let p = api::thatch_runtime_target_name(rt, *i, &raw mut len);
+                        !p.is_null() && std::slice::from_raw_parts(p.cast::<u8>(), len) == name.as_bytes()
+                    }
+                    None => api::thatch_runtime_target_is_stage(rt, *i) != 0,
+                });
+                api::thatch_runtime_mouse_button(rt, i8::from(*down), index.unwrap_or(-1));
+            }
+        }
+    }
+}
+
+/// Parses the command line of a compiled program: `--frames N`, `--timing`, `--seed N`,
+/// `--input FILE`.
 pub fn parse_args(args: &[String]) -> Result<RunOptions, String> {
     let mut options = RunOptions::default();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--timing" => options.timing = true,
+            "--input" => {
+                let path = args.get(i + 1).ok_or_else(|| "--input needs a file".to_owned())?;
+                let text = std::fs::read_to_string(path).map_err(|e| format!("could not read {path}: {e}"))?;
+                options.input = parse_input_script(&text)?;
+                i += 1;
+            }
             "--frames" | "--seed" => {
                 let value = args.get(i + 1).ok_or_else(|| format!("{} needs a number", args[i]))?;
                 let n: u64 = value.parse().map_err(|_| format!("{} needs a number, not {value}", args[i]))?;
@@ -193,5 +318,30 @@ pub unsafe fn main(argc: i32, argv: *const *const c_char, init: InitFn, abi_vers
             eprintln!("thatch: {e}");
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_scripts_parse() {
+        let events = parse_input_script("# a comment\n\n8 key up space\n5 key down left arrow\n20 mouse 100 -50.5\n21 mouse down\n25 mouse up Cat\n")
+            .unwrap();
+        assert_eq!(
+            events,
+            [
+                InputEvent { frame: 5, input: Input::Key { key: "left arrow".into(), down: true } },
+                InputEvent { frame: 8, input: Input::Key { key: "space".into(), down: false } },
+                InputEvent { frame: 20, input: Input::MouseMove { x: 100.0, y: -50.5 } },
+                InputEvent { frame: 21, input: Input::MouseButton { down: true, target: None } },
+                InputEvent { frame: 25, input: Input::MouseButton { down: false, target: Some("Cat".into()) } },
+            ]
+        );
+        assert!(parse_input_script("x key down a").is_err());
+        assert!(parse_input_script("1 key sideways a").is_err());
+        assert!(parse_input_script("1 mouse 3").is_err());
+        assert!(parse_input_script("1 touch 3 4").is_err());
     }
 }

@@ -88,6 +88,9 @@ pub struct Thread {
     pub script: usize,
     pub status: Status,
     pub killed: bool,
+    /// Set by a `stop all` from a thread earlier in the current pass: scratch-vm still steps the
+    /// threads after it once more before dropping them, so this one is killed after its step.
+    pub stop_after_step: bool,
     pub ctx: Box<ThreadCtx>,
     pub inner: Box<ThreadInner>,
     func: ScriptFn,
@@ -112,7 +115,18 @@ impl Thread {
             calls: Vec::new(),
         });
         ctx.inner = ptr::addr_of!(*inner).cast_mut().cast::<c_void>();
-        Self { id, target, script, status: Status::Fresh, killed: false, ctx, inner, func, coroutine: None }
+        Self {
+            id,
+            target,
+            script,
+            status: Status::Fresh,
+            killed: false,
+            stop_after_step: false,
+            ctx,
+            inner,
+            func,
+            coroutine: None,
+        }
     }
 
     /// Marks the thread stopped. It finishes the next time it is stepped.

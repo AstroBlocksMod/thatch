@@ -12,7 +12,7 @@ extern "C" {
 /* The ABI version this header describes. A program reports the version it was compiled for through
  * thatch_program_abi_version, and thatch_runtime_load refuses any other. A host passes it to
  * thatch_runtime_create, which refuses any other too. */
-#define THATCH_ABI_VERSION 4
+#define THATCH_ABI_VERSION 5
 
 /* The runtime. Opaque; create one with thatch_runtime_create. */
 typedef struct ThatchRuntime ThatchRuntime;
@@ -22,9 +22,13 @@ typedef void (*ThatchInitFn)(ThatchRuntime *rt);
 void thatch_program_init(ThatchRuntime *rt);
 int32_t thatch_program_abi_version(void);
 
-/* Hat kinds for thatch_runtime_start_hats. */
+/* Hat kinds for thatch_runtime_start_hats. Keys and clicks have their own functions below, which
+ * follow scratch-vm's rules for them; the kinds are listed for completeness. */
 #define THATCH_HAT_FLAG 0
 #define THATCH_HAT_BROADCAST 1
+#define THATCH_HAT_KEY 2
+#define THATCH_HAT_SPRITE_CLICKED 3
+#define THATCH_HAT_STAGE_CLICKED 4
 
 /* Results of thatch_runtime_load. */
 #define THATCH_LOAD_OK 0
@@ -127,6 +131,26 @@ void thatch_runtime_green_flag(ThatchRuntime *rt);
 /* Starts every script with the given hat kind (a THATCH_HAT_* value) and argument, such as a
  * broadcast name, as a broadcast block would. */
 void thatch_runtime_start_hats(ThatchRuntime *rt, int64_t hat, const char *arg, size_t len);
+
+/* A key went down or up. `key` is the key's name as a browser's KeyboardEvent.key gives it
+ * (" ", "a", "ArrowLeft", "Enter"; the Scratch names "space", "left arrow" and so on work
+ * too), UTF-8 and `len` bytes long. Names longer than one character that are not a known key
+ * are ignored, as scratch-vm ignores modifier keys. Going down starts the `when key pressed`
+ * hats for the key and for "any". */
+void thatch_runtime_key(ThatchRuntime *rt, const char *key, size_t len, int8_t down);
+
+/* The mouse moved to a point in Scratch coordinates (x from -240 to 240, y from -180 to 180,
+ * origin in the middle, y up); the runtime rounds and clamps it as scratch-vm does. */
+void thatch_runtime_mouse_move(ThatchRuntime *rt, double x, double y);
+
+/* The mouse button went down or up over `target`, the frontmost target under the pointer as
+ * the host sees it (the stage when no sprite is there), or -1 outside the stage. A click on a
+ * target that is not draggable starts its click hats as the button goes down; on a draggable
+ * one as it comes up. Nothing starts when the button state did not change. */
+void thatch_runtime_mouse_button(ThatchRuntime *rt, int8_t down, int64_t target);
+
+/* Whether the player may drag a target, which decides when its clicks count. */
+int8_t thatch_runtime_target_draggable(const ThatchRuntime *rt, int64_t target);
 
 /* Runs one frame: steps the threads until they all wait for the next frame, a redraw was
  * requested or 75 percent of a frame has passed. Returns 0, or nonzero after an error that

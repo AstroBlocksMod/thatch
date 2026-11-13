@@ -105,6 +105,10 @@ pub fn symbols() -> Vec<(&'static str, *const u8)> {
         thatch_costume_number,
         thatch_costume_name,
         thatch_property_of,
+        thatch_mouse_x,
+        thatch_mouse_y,
+        thatch_mouse_down,
+        thatch_key_pressed,
     ]
 }
 
@@ -115,6 +119,10 @@ pub fn host_symbols() -> Vec<(&'static str, *const u8)> {
         thatch_runtime_load,
         thatch_runtime_green_flag,
         thatch_runtime_start_hats,
+        thatch_runtime_key,
+        thatch_runtime_mouse_move,
+        thatch_runtime_mouse_button,
+        thatch_runtime_target_draggable,
         thatch_runtime_frame,
         thatch_runtime_redraw_requested,
         thatch_runtime_has_threads,
@@ -201,6 +209,37 @@ pub unsafe extern "C" fn thatch_runtime_start_hats(rt: *mut OpaqueRuntime, hat: 
     unsafe {
         let arg = text(arg.cast::<u8>(), len as i64).to_owned();
         (*rt.cast::<Runtime>()).start_hats(hat, &arg);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_key(rt: *mut OpaqueRuntime, key: *const c_char, len: usize, down: i8) {
+    // SAFETY: as `thatch_runtime_green_flag`; `key` is `len` bytes the host owns.
+    unsafe {
+        let key = text(key.cast::<u8>(), len as i64).to_owned();
+        (*rt.cast::<Runtime>()).key_event(&key, down != 0);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_mouse_move(rt: *mut OpaqueRuntime, x: f64, y: f64) {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe { (*rt.cast::<Runtime>()).mouse_move(x, y) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_mouse_button(rt: *mut OpaqueRuntime, down: i8, target: i64) {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe { (*rt.cast::<Runtime>()).mouse_button(down != 0, usize::try_from(target).ok()) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_target_draggable(rt: *const OpaqueRuntime, target: i64) -> i8 {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe {
+        let r = &*rt.cast::<Runtime>();
+        let t = usize::try_from(target).ok().and_then(|i| r.targets.get(i));
+        i8::from(t.is_some_and(|t| t.draggable))
     }
 }
 
@@ -1221,6 +1260,32 @@ pub unsafe extern "C" fn thatch_property_of(ctx: *mut ThreadCtx, out: *mut Value
             }
         };
     }
+}
+
+// ---- input ------------------------------------------------------------------------------------
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_mouse_x(ctx: *mut ThreadCtx) -> f64 {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe { runtime(ctx).mouse_x }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_mouse_y(ctx: *mut ThreadCtx) -> f64 {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe { runtime(ctx).mouse_y }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_mouse_down(ctx: *mut ThreadCtx) -> i8 {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe { i8::from(runtime(ctx).mouse_down) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_key_pressed(ctx: *mut ThreadCtx, key: *const Value) -> i8 {
+    // SAFETY: as `thatch_any_to_num`.
+    unsafe { i8::from(runtime(ctx).key_pressed(value_arg(key))) }
 }
 
 #[cfg(test)]

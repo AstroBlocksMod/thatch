@@ -29,6 +29,11 @@ enum Cmd {
         /// The seed of `pick random`.
         #[arg(long)]
         seed: Option<u64>,
+        /// A script of key and mouse events to feed the program, one per line: `FRAME key down
+        /// NAME`, `FRAME key up NAME`, `FRAME mouse X Y`, `FRAME mouse down [TARGET]`, `FRAME
+        /// mouse up [TARGET]`. See samples/input/input.txt.
+        #[arg(long)]
+        input: Option<PathBuf>,
     },
     /// Compiles a project to a standalone executable.
     Build {
@@ -71,7 +76,17 @@ fn main() -> anyhow::Result<()> {
 
 fn command(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
-        Cmd::Run { project, frames, timing, seed } => run(&project, RunOptions { frames, timing, seed }),
+        Cmd::Run { project, frames, timing, seed, input } => {
+            let input = match input {
+                Some(path) => {
+                    let text =
+                        std::fs::read_to_string(&path).with_context(|| format!("could not read {}", path.display()))?;
+                    thatch_runtime::parse_input_script(&text).map_err(anyhow::Error::msg)?
+                }
+                None => Vec::new(),
+            };
+            run(&project, RunOptions { frames, timing, seed, input })
+        }
         Cmd::Build { project, output, object, no_main, runtime_lib } => {
             build(&project, output, object, !no_main, runtime_lib)
         }

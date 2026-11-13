@@ -5,9 +5,13 @@ This page lists what the Scratch frontend compiles. Keep it in step with `crates
 ## Events
 
 - when green flag clicked
+- when (key) pressed, including any key
+- when this sprite clicked, when stage clicked
 - when I receive (message)
 - broadcast (message), including a message computed by a reporter
 - broadcast (message) and wait
+
+A key hat does not start again while a thread of its script is still running, as in scratch-vm; every other hat restarts the running thread. The keys, the mouse and the clicks come from the host (see [the ABI](abi.md#input)); the headless host reads them from an input script given with `--input`.
 
 ## Control
 
@@ -68,6 +72,8 @@ Lists are not supported yet. Cloud variables compile as ordinary variables, with
 
 - timer, reset timer
 - (x position, y position, direction, costume #, costume name, size, volume or a variable) of (sprite), and (backdrop #, backdrop name, volume or a variable) of (Stage)
+- key (key) pressed?, including any key, a letter or a key code
+- mouse down?, mouse x, mouse y
 
 ## My blocks
 
@@ -84,6 +90,7 @@ These are the places where a compiled project can behave differently from scratc
 - `set size to` and `change size by` without a host that can measure the costume (the headless host, for one) store the size as given. scratch-vm without a renderer ignores the blocks altogether, and with one clamps the size between 5 pixels and one and a half stages, which Thatch does as soon as the host provides `measure`.
 - `volume` is a number the project sets and `of` reports; there is no sound yet, so nothing changes it.
 - The random position of `go to` and `glide to`, and the random direction of `point towards`, come from Thatch's own generator, so they differ from scratch-vm's as any random numbers do.
+- Sprites cannot be dragged yet. A draggable sprite still follows Scratch's rule that it is clicked when the mouse button comes up rather than when it goes down.
 - The input of `repeat` is evaluated once, where scratch-vm evaluates it on every iteration. Only `pick random` inside the input could tell the difference.
 - `letter of` on half of a character outside the Basic Multilingual Plane gives U+FFFD instead of a lone surrogate, since Rust strings cannot hold one.
 - Cloud variables never sync with a server; they keep their values only for the run.

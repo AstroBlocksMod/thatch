@@ -113,6 +113,14 @@ pub enum RtExpr {
     /// `property of object`: Str, Str -> Any. The property is a name such as "x position" or a
     /// variable name; the object a sprite name or "_stage_".
     PropertyOf,
+    /// `mouse x`: -> Num.
+    MouseX,
+    /// `mouse y`: -> Num.
+    MouseY,
+    /// `mouse down?`: -> Bool.
+    MouseDown,
+    /// `key pressed?`: Any -> Bool. The key is a name ("space", "a", "any"), a letter or a key code.
+    KeyPressed,
 }
 
 /// Runtime commands.
@@ -303,6 +311,14 @@ pub enum Hat {
     FlagClicked,
     /// The message name, matched case-insensitively.
     BroadcastReceived(String),
+    /// `when key pressed`, with the key as the menu names it ("space", "left arrow", "a", "0" or
+    /// "any"), matched case-insensitively. A key hat does not restart its script while a thread of
+    /// it is still running.
+    KeyPressed(String),
+    /// `when this sprite clicked`.
+    SpriteClicked,
+    /// `when stage clicked`. Like the sprite hat, it fires when the target it sits on is clicked.
+    StageClicked,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -430,8 +446,10 @@ impl Expr {
                 | RtExpr::SpriteDirection
                 | RtExpr::SpriteSize
                 | RtExpr::CostumeNumber
-                | RtExpr::BackdropNumber => Type::Num,
-                RtExpr::Contains => Type::Bool,
+                | RtExpr::BackdropNumber
+                | RtExpr::MouseX
+                | RtExpr::MouseY => Type::Num,
+                RtExpr::Contains | RtExpr::MouseDown | RtExpr::KeyPressed => Type::Bool,
                 RtExpr::PropertyOf => Type::Any,
             },
         }

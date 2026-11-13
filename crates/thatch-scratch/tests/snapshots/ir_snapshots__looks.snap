@@ -16,16 +16,18 @@ str 10 = ""
 str 11 = "1"
 str 12 = "nope"
 str 13 = "  "
-str 14 = "1.5"
-str 15 = "blue"
-str 16 = "previous backdrop"
-str 17 = "backdrop1"
-str 18 = "50.4"
-str 19 = "0.2"
-str 20 = "done"
-str 21 = "A"
-str 22 = "B"
-str 23 = "C"
+str 14 = "0"
+str 15 = "1.5"
+str 16 = "-1"
+str 17 = "blue"
+str 18 = "previous backdrop"
+str 19 = "backdrop1"
+str 20 = "50.4"
+str 21 = "0.2"
+str 22 = "done"
+str 23 = "A"
+str 24 = "B"
+str 25 = "C"
 target "Stage" (stage)
   backdrop 0 volume 100
   costumes ["backdrop1", "blue", "backdrop3"]
@@ -84,26 +86,26 @@ fn 1 "Cat/flag b13"()
   Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
   SwitchCostume((any)str 13)
   Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
-  SwitchCostume((any)0)
-  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
   SwitchCostume((any)str 14)
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)str 15)
   Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
   SwitchCostume((any)Lt(1, 2))
   Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
-  SwitchCostume((any)-1)
+  SwitchCostume((any)str 16)
   Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
-  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
-  SwitchBackdrop((any)str 15)
-  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
-  NextBackdrop()
-  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
-  NextBackdrop()
-  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
-  SwitchBackdrop((any)str 16)
   Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
   SwitchBackdrop((any)str 17)
   Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
-  SwitchBackdrop((any)3)
+  NextBackdrop()
+  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
+  NextBackdrop()
+  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
+  SwitchBackdrop((any)str 18)
+  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
+  SwitchBackdrop((any)str 19)
+  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
+  SwitchBackdrop((any)str 7)
   Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
   Say((any)SpriteSize())
   SetSize(50.4)
@@ -113,20 +115,20 @@ fn 1 "Cat/flag b13"()
   ChangeEffect(Color)(25)
   ClearEffects()
   Show()
-  Say((any)str 20)
+  Say((any)str 22)
 fn 2 "A/receive ping"()
-  Say((any)str 21)
+  Say((any)str 23)
 fn 3 "A/receive afront"()
   GoToLayer(true)()
 fn 4 "A/receive aback"()
   GoLayers(Sub(0, 2))
 fn 5 "B/receive ping"()
-  Say((any)str 22)
+  Say((any)str 24)
 fn 6 "B/receive bforward"()
   GoLayers(1)
 fn 7 "B/receive bfar"()
   GoLayers(Sub(0, 100))
 fn 8 "C/receive ping"()
-  Say((any)str 23)
+  Say((any)str 25)
 fn 9 "C/receive cback"()
   GoToLayer(false)()

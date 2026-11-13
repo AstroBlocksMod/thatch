@@ -16,5 +16,8 @@ itself, not against what Thatch happened to print. `thatch run samples/<name>/pr
 - `numbers`: NaN handling, hexadecimal and exponent literals, and the hidden while block.
 - `motion`: moving, turning and pointing, direction wrapping, going and gliding to points and sprites, and what `of` reports about another sprite and the stage.
 - `looks`: costumes and backdrops by number, name and keyword, size, effects, show and hide, and the layer blocks, whose effect shows in the order sprites answer a broadcast.
+- `input`: key hats (and that they do not restart), the any-key hat, stage clicks, `key pressed?` with names, letters and codes, `mouse down?`, `mouse x` and `mouse y`, driven by `input.txt`.
+
+A sample with an `input.txt` is run with `--input`: one event per line, starting with the frame it happens before: `5 key down space`, `10 key up left arrow`, `20 mouse 100 -50`, `21 mouse down`, `25 mouse up Cat` (the stage when no target is named). The oracle takes the same file, so expected output with input comes from `node oracle.js project.json input.txt`. Keep events several frames clear of the moment a timed block ends, since scratch-vm runs on the real clock. The C host in the CLI tests takes no input, so it skips these samples.
 
 `crates/thatch-scratch/tests/snapshots/` holds the IR each sample lowers to.
