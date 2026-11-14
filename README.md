@@ -10,4 +10,4 @@ target/release/thatch build project.sb3 -o project && ./project
 
 The compiler is at the MVP stage: variables, operators, control blocks, custom blocks, broadcasts, waits and `say` work, and every sample prints exactly what scratch-vm prints. A stage with a real host comes next, then lists and clones. The docs in `docs/` cover [getting started](docs/getting-started.md), the [supported blocks](docs/blocks.md), the [architecture](docs/architecture.md), the [IR](docs/ir.md), the [C ABI](docs/abi.md) and the [roadmap](docs/roadmap.md).
 
-Thatch is free software under the Apache-2.0 license with LLVM exceptions, so the programs it builds can be shipped under any license.
+Thatch is free software under the Apache-2.0 license with LLVM exceptions, so the programs it builds can be shipped under any license. They carry the license notices of the open source libraries the runtime uses; [Getting started](docs/getting-started.md#licenses-of-a-built-executable) lists them.

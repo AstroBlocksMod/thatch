@@ -2,7 +2,7 @@
 
 Thatch is an ahead-of-time compiler that turns Scratch projects into standalone native executables. It reads a standard `.sb3` file, lowers the blocks to a typed intermediate representation, generates machine code with Cranelift and links the result against a small runtime. There is no browser and no JavaScript engine in the result: a `forever` loop is a loop, a variable is a number in memory, and a custom block is a function.
 
-It is written in Rust and licensed under Apache-2.0 with LLVM exceptions, so the programs it builds can be shipped under any license.
+It is written in Rust and licensed under Apache-2.0 with LLVM exceptions, so the programs it builds can be shipped under any license, along with the [license notices](getting-started.md#licenses-of-a-built-executable) of the libraries its runtime uses.
 
 ## What it does today
 

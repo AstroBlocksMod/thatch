@@ -35,6 +35,10 @@ thatch build project.sb3 -o project
 
 writes an object file with Cranelift, then links it with `cc` against `libthatch_runtime.a`, which `thatch` looks for next to itself (`--runtime-lib` or `THATCH_RUNTIME_LIB` point it elsewhere). The executable takes the same `--frames`, `--timing` and `--seed` options as `thatch run`. `--object` writes only the object file.
 
+### Licenses of a built executable
+
+You can ship what Thatch builds under any license you like. Thatch's own runtime is Apache-2.0 with LLVM exceptions, which asks nothing of the executables it ends up in. The libraries the runtime is built from do ask for one thing: they are under the MIT license or Apache-2.0 (your choice for each), and either one wants its license text to go along with the executable, for example in a `LICENSES` folder or an "about" screen. They are Rust's standard library, `corosensei`, `libc`, `cfg-if` and `scopeguard`, plus `windows-sys` on Windows. `ryu-js` can be taken under BSL-1.0 instead, which needs no notice in an executable.
+
 ## Looking inside
 
 ```sh
