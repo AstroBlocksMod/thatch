@@ -1,10 +1,17 @@
 //! The headless host: runs a program with a virtual clock and prints what sprites say.
+//!
+//! It is the first implementation of the host table in `thatch_abi::Host`, and it goes through the
+//! same C API (`thatch_runtime_*` in `api.rs`) a host written in C would use, so running the samples
+//! exercises that surface too.
 
-use std::ffi::{CStr, c_char};
+use std::ffi::{CStr, c_char, c_void};
+use std::io::Write;
+use std::ptr;
 use std::time::Instant;
 
-use crate::InitFn;
-use crate::scheduler::Runtime;
+use thatch_abi::{Host, InitFn, OpaqueRuntime};
+
+use crate::api;
 
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
@@ -22,60 +29,111 @@ pub struct RunReport {
     pub says: u64,
 }
 
+/// What the headless host keeps between callbacks.
+struct Headless {
+    says: u64,
+}
+
+/// The `say` callback: prints every non-empty bubble as `Name says: text`.
+unsafe extern "C" fn headless_say(
+    data: *mut c_void,
+    rt: *mut OpaqueRuntime,
+    target: i64,
+    text: *const u8,
+    len: usize,
+    think: i8,
+) {
+    if len == 0 {
+        return;
+    }
+    // SAFETY: the runtime passes back the `Headless` this host registered, a live runtime, and
+    // `len` bytes of UTF-8 that outlive the call.
+    unsafe {
+        let host = &mut *data.cast::<Headless>();
+        host.says += 1;
+        let text = std::str::from_utf8_unchecked(std::slice::from_raw_parts(text, len));
+        let mut name_len = 0;
+        let name = api::thatch_runtime_target_name(rt, target, &raw mut name_len);
+        let name = if name.is_null() {
+            ""
+        } else {
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(name.cast::<u8>(), name_len))
+        };
+        let mut out = std::io::stdout().lock();
+        let _ = writeln!(out, "{name} {}: {text}", if think != 0 { "thinks" } else { "says" });
+    }
+}
+
 /// Checks the program's ABI version, registers the program through `init` and runs it headless
 /// until no script is left or the frame limit is reached.
 ///
 /// `abi_version` is the version the program was compiled against (`thatch_abi::ABI_VERSION` at
 /// its compile time); a program built for another version is refused before any of its code runs.
 pub fn run(init: InitFn, abi_version: u32, options: &RunOptions) -> Result<RunReport, String> {
-    if abi_version != thatch_abi::ABI_VERSION {
-        return Err(format!(
-            "the program was compiled for ABI version {abi_version}, but this runtime has version {}",
-            thatch_abi::ABI_VERSION
-        ));
-    }
     let seed = options.seed.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0x9E37_79B9_7F4A_7C15)
     });
-    let rt = Runtime::create(seed);
-    // SAFETY: `rt` is the runtime just created; references into it are only taken while no thread
-    // runs, and the runtime is shut down and freed exactly once below.
-    let result = unsafe { run_program(rt, init, options) };
+    let mut headless = Headless { says: 0 };
+    let host = Host { data: ptr::addr_of_mut!(headless).cast::<c_void>(), say: Some(headless_say), now_ms: None };
+    // SAFETY: `host` outlives the runtime, which is created and destroyed here, and the runtime is
+    // only touched between frames through the C API.
     unsafe {
-        Runtime::shutdown(rt);
-        Runtime::destroy(rt);
+        let rt = api::thatch_runtime_create(thatch_abi::ABI_VERSION as i32, &raw const host, seed);
+        let result = run_program(rt, init, abi_version, options);
+        api::thatch_runtime_destroy(rt);
+        result.map(|frames| RunReport { frames, says: headless.says })
     }
-    result
 }
 
-/// The body of [`run`], whose result `run` returns only after shutting the runtime down.
+/// The body of [`run`], whose result `run` returns only after destroying the runtime.
 ///
 /// # Safety
-/// `rt` must come from [`Runtime::create`] and `init` must be a program's init function.
-unsafe fn run_program(rt: *mut Runtime, init: InitFn, options: &RunOptions) -> Result<RunReport, String> {
-    // SAFETY: forwarded from the caller; `init` only registers, it runs no script.
+/// `rt` must come from `thatch_runtime_create` and `init` must be a program's init function.
+unsafe fn run_program(
+    rt: *mut OpaqueRuntime,
+    init: InitFn,
+    abi_version: u32,
+    options: &RunOptions,
+) -> Result<u64, String> {
+    // SAFETY: forwarded from the caller.
     unsafe {
-        init(rt);
-        if !(*rt).targets.iter().any(|t| t.is_stage) {
-            return Err("the program registered no stage".to_owned());
+        match api::thatch_runtime_load(rt, abi_version as i32, init) {
+            thatch_abi::LOAD_OK => {}
+            thatch_abi::LOAD_WRONG_ABI_VERSION => {
+                return Err(format!(
+                    "the program was compiled for ABI version {abi_version}, but this runtime has version {}",
+                    thatch_abi::ABI_VERSION
+                ));
+            }
+            thatch_abi::LOAD_NO_STAGE => return Err("the program registered no stage".to_owned()),
+            other => return Err(format!("loading the program failed with code {other}")),
         }
         let started = Instant::now();
-        (*rt).start_flag();
-        while (*rt).has_threads() {
-            if options.frames.is_some_and(|max| (*rt).frame >= max) {
+        api::thatch_runtime_green_flag(rt);
+        while api::thatch_runtime_has_threads(rt) != 0 {
+            if options.frames.is_some_and(|max| api::thatch_runtime_frame_count(rt) >= max) {
                 break;
             }
-            Runtime::frame(rt)?;
+            if api::thatch_runtime_frame(rt) != 0 {
+                let mut len = 0;
+                let msg = api::thatch_runtime_last_error(rt, &raw mut len);
+                let msg = if msg.is_null() {
+                    "unknown error".to_owned()
+                } else {
+                    String::from_utf8_lossy(std::slice::from_raw_parts(msg.cast::<u8>(), len)).into_owned()
+                };
+                return Err(msg);
+            }
         }
-        let report = RunReport { frames: (*rt).frame, says: (*rt).say_count };
+        let frames = api::thatch_runtime_frame_count(rt);
         if options.timing {
             let ms = started.elapsed().as_secs_f64() * 1000.0;
-            eprintln!("thatch: {} frames in {ms:.1} ms", report.frames);
+            eprintln!("thatch: {frames} frames in {ms:.1} ms");
         }
-        Ok(report)
+        Ok(frames)
     }
 }
 

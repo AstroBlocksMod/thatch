@@ -3,9 +3,13 @@
 //! A frame steps the threads in passes, as scratch-vm's sequencer does: a pass steps every thread
 //! that is not done and not waiting for the next frame, in list order, including threads started
 //! during the pass. Passes repeat while some stepped thread is still active, no redraw was requested
-//! and less than 75 percent of the frame time has gone by. The clock that `wait` and `timer` read is
-//! virtual, one thirtieth of a second per frame, so runs are repeatable; only the frame budget is
-//! real time.
+//! and less than 75 percent of the frame time has gone by. The clock that `wait` and `timer` read
+//! comes from the host; without one it is virtual, one thirtieth of a second per frame, so headless
+//! runs are repeatable. Only the frame budget is always real time.
+//!
+//! The runtime talks back to its host through the [`Host`] table it was created with: every bubble
+//! goes to `say`, and the clock to `now_ms`. The host drives the frame loop through the C API in
+//! `api.rs`.
 //!
 //! # Aliasing
 //!
@@ -14,15 +18,20 @@
 //! reference to the `Runtime` across a coroutine resume: the runtime lives behind a raw pointer
 //! from [`Runtime::create`] to [`Runtime::destroy`], and the functions that resume threads
 //! ([`Runtime::frame`], [`Runtime::shutdown`]) take that pointer and borrow only between resumes.
+//!
+//! Host callbacks follow the same rule. A callback receives the runtime pointer and may call back
+//! in (the headless host asks for the target's name in `say`), so no reference to the runtime may
+//! be alive while one runs either. The clock gets only the host's data, but a host may keep the
+//! runtime pointer there, so the same holds for it. Everything that calls the host is a method of
+//! [`Rt`], which borrows the runtime only between callbacks.
 
 use std::ffi::c_void;
-use std::io::Write;
 use std::ptr;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use corosensei::CoroutineResult;
-use thatch_abi::{HAT_BROADCAST, HAT_FLAG, TAG_STR, ThreadCtx, Value};
+use thatch_abi::{HAT_BROADCAST, HAT_FLAG, Host, OpaqueRuntime, TAG_STR, ThreadCtx, Value};
 
 use crate::strings::{self, Handle};
 use crate::thread::{ScriptFn, Status, Thread, Yield};
@@ -52,6 +61,8 @@ pub struct Target {
 pub struct Runtime {
     /// The pointer this runtime lives behind, which threads use to reach it.
     this: *mut Runtime,
+    /// The host's callbacks. `data` is the host's; the runtime only passes it back.
+    host: Host,
     pub targets: Vec<Box<Target>>,
     consts: Vec<Rc<String>>,
     const_ptrs: Vec<Handle>,
@@ -59,20 +70,30 @@ pub struct Runtime {
     /// Threads replaced by a restart. Suspended ones are resumed to finish at the end of the pass.
     dying: Vec<Thread>,
     next_thread_id: u64,
+    /// Whether a block asked for a redraw in this frame, which ends the frame after the current
+    /// pass as in scratch-vm. Cleared when a frame starts.
     pub redraw_requested: bool,
+    /// Whether the host should draw after the current frame, and whether something asked for that
+    /// between frames, which the next frame carries over (see [`Runtime::host_should_draw`]).
+    draw_requested: bool,
+    draw_requested_between: bool,
+    in_frame: bool,
+    /// Whether a program was loaded; a runtime holds one.
+    pub(crate) loaded: bool,
     pub frame: u64,
     timer_start_ms: f64,
     frame_started: Instant,
     rng: u64,
-    pub headless: bool,
-    pub say_count: u64,
+    /// The message of the last error, for `thatch_runtime_last_error`.
+    pub last_error: Option<String>,
 }
 
 impl Runtime {
     /// Allocates a runtime behind a raw pointer. Free it with [`Runtime::destroy`].
-    pub fn create(seed: u64) -> *mut Runtime {
+    pub fn create(host: Host, seed: u64) -> *mut Runtime {
         let rt = Box::into_raw(Box::new(Self {
             this: ptr::null_mut(),
+            host,
             targets: Vec::new(),
             consts: Vec::new(),
             const_ptrs: Vec::new(),
@@ -80,12 +101,15 @@ impl Runtime {
             dying: Vec::new(),
             next_thread_id: 1,
             redraw_requested: false,
+            draw_requested: false,
+            draw_requested_between: false,
+            in_frame: false,
+            loaded: false,
             frame: 0,
             timer_start_ms: 0.0,
             frame_started: Instant::now(),
             rng: seed | 1,
-            headless: true,
-            say_count: 0,
+            last_error: None,
         }));
         // SAFETY: just allocated, and nothing else knows the pointer yet.
         unsafe { (*rt).this = rt };
@@ -150,19 +174,22 @@ impl Runtime {
         self.targets.iter().position(|t| t.is_stage).unwrap_or(0)
     }
 
-    // ---- clock --------------------------------------------------------------------------------
-
-    /// Milliseconds on the virtual clock.
-    pub fn now_ms(&self) -> f64 {
-        self.frame as f64 * 1000.0 / FPS
+    /// Forgets everything a program registered, as after a failed load. No thread may exist yet.
+    pub(crate) fn unload(&mut self) {
+        self.release_variables();
+        self.targets.clear();
+        self.consts.clear();
+        self.const_ptrs.clear();
     }
 
-    pub fn timer(&self) -> f64 {
-        (self.now_ms() - self.timer_start_ms) / 1000.0
-    }
-
-    pub fn reset_timer(&mut self) {
-        self.timer_start_ms = self.now_ms();
+    /// Drops the strings the variables hold.
+    fn release_variables(&mut self) {
+        for t in &mut self.targets {
+            for slot in &mut t.anys {
+                // SAFETY: variable slots own their strings, and no thread runs while this does.
+                unsafe { VarSlot::replace(ptr::addr_of_mut!(*slot), crate::value::num(0.0)) };
+            }
+        }
     }
 
     /// A uniform random number in `[0, 1)`, from a xorshift generator.
@@ -175,8 +202,27 @@ impl Runtime {
         (x >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
     }
 
+    /// A block asks for a redraw: the frame ends after the current pass, and the host draws.
     pub fn request_redraw(&mut self) {
         self.redraw_requested = true;
+        self.host_draw();
+    }
+
+    /// Something changed what the host shows, without asking for a redraw the way scratch-vm's
+    /// blocks do. The scheduler goes on; the host draws after the frame.
+    pub fn host_draw(&mut self) {
+        if self.in_frame {
+            self.draw_requested = true;
+        } else {
+            self.draw_requested_between = true;
+        }
+    }
+
+    /// Whether the host should draw: something asked for it during the last frame or since. A
+    /// frame clears what it carried over only once it starts, so a `stop all` from the host between
+    /// frames is drawn after the next one.
+    pub fn host_should_draw(&self) -> bool {
+        self.draw_requested || self.draw_requested_between
     }
 
     // ---- threads ------------------------------------------------------------------------------
@@ -240,13 +286,13 @@ impl Runtime {
         self.threads.iter().find(|t| t.id == id).map(|t| t.status)
     }
 
-    pub fn stop_all(&mut self) {
+    /// Kills every thread, the part of `stop all` that does not call the host; [`Rt::stop_all`]
+    /// is the rest. Returns the targets whose bubbles need clearing.
+    fn kill_all(&mut self) -> Vec<usize> {
         for t in &mut self.threads {
             t.kill();
         }
-        for t in &mut self.targets {
-            t.bubble.clear();
-        }
+        (0..self.targets.len()).filter(|i| !self.targets[*i].bubble.is_empty()).collect()
     }
 
     pub fn stop_others(&mut self, target: usize, except: u64) {
@@ -268,6 +314,8 @@ impl Runtime {
             // SAFETY: no thread runs here, and the caller holds no reference.
             let r = unsafe { &mut *rt };
             r.redraw_requested = false;
+            r.draw_requested = std::mem::take(&mut r.draw_requested_between);
+            r.in_frame = true;
             r.frame_started = Instant::now();
             for t in &mut r.threads {
                 if t.status == Status::TickYield {
@@ -275,6 +323,21 @@ impl Runtime {
                 }
             }
         }
+        // SAFETY: forwarded from the caller.
+        let result = unsafe { Self::passes(rt) };
+        // SAFETY: no thread runs here.
+        unsafe {
+            (*rt).in_frame = false;
+            (*rt).frame += 1;
+        }
+        result
+    }
+
+    /// The passes of a frame.
+    ///
+    /// # Safety
+    /// As [`Runtime::frame`].
+    unsafe fn passes(rt: *mut Runtime) -> Result<(), String> {
         loop {
             let mut active = 0;
             let mut stopped = false;
@@ -308,12 +371,9 @@ impl Runtime {
             // SAFETY: forwarded from the caller.
             unsafe { Self::finish_dying(rt) };
             if done {
-                break;
+                return Ok(());
             }
         }
-        // SAFETY: no thread runs here.
-        unsafe { (*rt).frame += 1 };
-        Ok(())
     }
 
     /// Steps the thread at index `i` once and returns the status it stopped in.
@@ -373,11 +433,11 @@ impl Runtime {
     /// # Safety
     /// As [`Runtime::frame`].
     pub unsafe fn shutdown(rt: *mut Runtime) {
-        let threads = {
-            // SAFETY: no thread runs here.
-            let r = unsafe { &mut *rt };
-            r.stop_all();
-            std::mem::take(&mut r.threads)
+        // SAFETY: forwarded from the caller; no thread runs here.
+        let threads = unsafe {
+            let handle = Rt::new(rt);
+            handle.stop_all();
+            handle.with(|r| std::mem::take(&mut r.threads))
         };
         for mut t in threads {
             t.finish();
@@ -386,32 +446,10 @@ impl Runtime {
         unsafe { Self::finish_dying(rt) };
     }
 
-    /// Whether some thread could still run.
+    /// Whether some thread could still run. A killed thread only waits for its next step to finish,
+    /// so it does not count.
     pub fn has_threads(&self) -> bool {
-        !self.threads.is_empty()
-    }
-
-    pub fn start_flag(&mut self) {
-        self.reset_timer();
-        self.start_hats(HAT_FLAG, "");
-    }
-
-    // ---- looks --------------------------------------------------------------------------------
-
-    /// `say` and `think`. Returns the bubble token, which `say for secs` uses to clear only its own
-    /// bubble.
-    pub fn say(&mut self, target: usize, text: String, think: bool) -> u64 {
-        let text = truncate_utf16(text, 330);
-        let t = &mut self.targets[target];
-        t.bubble_token += 1;
-        if self.headless && !text.is_empty() {
-            self.say_count += 1;
-            let mut out = std::io::stdout().lock();
-            let _ = writeln!(out, "{} {}: {}", t.name, if think { "thinks" } else { "says" }, text);
-        }
-        t.bubble = text;
-        self.redraw_requested = true;
-        t.bubble_token
+        self.threads.iter().any(|t| !t.killed)
     }
 
     pub fn bubble_token(&self, target: usize) -> u64 {
@@ -419,14 +457,102 @@ impl Runtime {
     }
 }
 
+/// The runtime behind its raw pointer, for everything that calls the host with that pointer.
+///
+/// A callback may call back into the runtime through the C API, which reads it, so no reference
+/// to the runtime may be alive while one runs. The methods here borrow the runtime only for short
+/// stretches with [`Rt::with`] and call the host between them.
+#[derive(Clone, Copy)]
+pub struct Rt(*mut Runtime);
+
+impl Rt {
+    /// # Safety
+    /// `rt` must come from [`Runtime::create`] and live while the handle is used, and nothing may
+    /// hold a reference to the runtime meanwhile: the rule in the module documentation.
+    pub unsafe fn new(rt: *mut Runtime) -> Self {
+        Self(rt)
+    }
+
+    /// Borrows the runtime for `f`. `f` must not call the host with the runtime pointer (only `Rt`
+    /// methods do that) or reach the runtime through another handle; the borrow ends when it
+    /// returns.
+    pub fn with<R>(self, f: impl FnOnce(&mut Runtime) -> R) -> R {
+        // SAFETY: `new` promised a live runtime that nothing else borrows, and `f` reaches it only
+        // through this borrow.
+        unsafe { f(&mut *self.0) }
+    }
+
+    /// `say` and `think`. Returns the bubble token, which `say for secs` uses to clear only its own
+    /// bubble.
+    pub fn say(self, target: usize, text: String, think: bool) -> u64 {
+        let text = truncate_utf16(text, 330);
+        let (token, host) = self.with(|r| {
+            let t = &mut r.targets[target];
+            t.bubble_token += 1;
+            t.bubble.clone_from(&text);
+            let token = t.bubble_token;
+            r.request_redraw();
+            (token, r.host)
+        });
+        if let Some(say) = host.say {
+            // SAFETY: the host gave this callback and its data for the runtime to call. The text is
+            // a copy that outlives the call, and no reference to the runtime is alive, so the
+            // callback may call back in.
+            unsafe {
+                say(
+                    host.data,
+                    self.0.cast::<OpaqueRuntime>(),
+                    target as i64,
+                    text.as_ptr(),
+                    text.len(),
+                    i8::from(think),
+                )
+            };
+        }
+        token
+    }
+
+    /// Milliseconds on the host's clock, or on the virtual clock when the host has none. The clock
+    /// is a host callback, so it is read with no reference to the runtime alive.
+    pub fn now_ms(self) -> f64 {
+        let (now, data, frame) = self.with(|r| (r.host.now_ms, r.host.data, r.frame));
+        match now {
+            // SAFETY: the host gave this callback and its data for the runtime to call, and no
+            // reference to the runtime is alive, so the callback may call back in.
+            Some(now) => unsafe { now(data) },
+            None => frame as f64 * 1000.0 / FPS,
+        }
+    }
+
+    /// The `timer` reporter, in seconds.
+    pub fn timer(self) -> f64 {
+        let now = self.now_ms();
+        self.with(|r| (now - r.timer_start_ms) / 1000.0)
+    }
+
+    pub fn reset_timer(self) {
+        let now = self.now_ms();
+        self.with(|r| r.timer_start_ms = now);
+    }
+
+    /// Stops every thread, as the stop sign or a `stop all` block does, and clears every bubble.
+    pub fn stop_all(self) {
+        for target in self.with(Runtime::kill_all) {
+            self.say(target, String::new(), false);
+        }
+    }
+
+    /// The green flag: everything stops first, as scratch-vm's `greenFlag` calls `stopAll`.
+    pub fn start_flag(self) {
+        self.stop_all();
+        self.reset_timer();
+        self.with(|r| r.start_hats(HAT_FLAG, ""));
+    }
+}
+
 impl Drop for Runtime {
     fn drop(&mut self) {
-        for t in &mut self.targets {
-            for slot in &mut t.anys {
-                // SAFETY: variable slots own their strings, and nothing runs after the runtime.
-                unsafe { VarSlot::replace(ptr::addr_of_mut!(*slot), crate::value::num(0.0)) };
-            }
-        }
+        self.release_variables();
     }
 }
 

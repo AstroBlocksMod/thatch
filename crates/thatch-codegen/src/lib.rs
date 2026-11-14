@@ -103,12 +103,14 @@ pub fn compile_jit(program: &Program, symbols: &[(&str, *const u8)]) -> Result<J
     Ok(JitProgram { module: Some(module), init, abi_version })
 }
 
-/// Compiles the program into an object file with a `main`, ready to link against the runtime.
-pub fn compile_object(program: &Program) -> Result<Vec<u8>, Error> {
+/// Compiles the program into an object file, ready to link against the runtime. With `with_main`
+/// it includes a C `main` that runs the program on the headless host; without, a host provides
+/// `main` and drives the program through `thatch_program_init` and `thatch_program_abi_version`.
+pub fn compile_object(program: &Program, with_main: bool) -> Result<Vec<u8>, Error> {
     let isa = host_isa(true)?;
     let builder = ObjectBuilder::new(isa, "thatch_program", default_libcall_names())?;
     let mut module = ObjectModule::new(builder);
-    Compiler::new(&mut module, program).compile(true)?;
+    Compiler::new(&mut module, program).compile(with_main)?;
     module.finish().emit().map_err(|e| Error::Object(e.to_string()))
 }
 
