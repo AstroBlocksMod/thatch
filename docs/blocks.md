@@ -59,5 +59,5 @@ These are the places where a compiled project can behave differently from scratc
 - The input of `repeat` is evaluated once, where scratch-vm evaluates it on every iteration. Only `pick random` inside the input could tell the difference.
 - `letter of` on half of a character outside the Basic Multilingual Plane gives U+FFFD instead of a lone surrogate, since Rust strings cannot hold one.
 - Cloud variables never sync with a server; they keep their values only for the run.
-- Blocks nested more than 1000 deep, counting C blocks and reporters inside inputs, are a compile error that names the block, so a malformed or generated project cannot overflow the compiler's stack. scratch-vm has no such limit.
+- Blocks nested more than 1000 deep, counting C blocks and reporters inside inputs (blocks that merely follow one another do not count), are a compile error that names the block, so a malformed or generated project cannot overflow the compiler's stack. scratch-vm has no such limit.
 - Trigonometric results can differ in the last digit from V8's where the platform's `libm` and V8's fdlibm port disagree, before scratch-vm's rounding to ten decimals hides it.

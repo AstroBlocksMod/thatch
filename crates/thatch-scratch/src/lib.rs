@@ -53,8 +53,28 @@ pub struct Lowered {
     pub warnings: Vec<Warning>,
 }
 
-/// Lowers a project to the IR.
+/// The stack lowering runs on. It recurses once per nesting level, and a project nested
+/// [`MAX_NESTING`] deep needs more than a usual thread's stack in a debug build. Only the pages
+/// actually used cost memory.
+const LOWERING_STACK: usize = 256 << 20;
+
+/// Lowers a project to the IR. The work runs on a thread of its own with a large stack, so any
+/// caller can lower a project nested up to [`MAX_NESTING`] deep, whatever its own stack.
 pub fn lower(project: &Project) -> Result<Lowered, Error> {
+    std::thread::scope(|scope| {
+        match std::thread::Builder::new()
+            .name("thatch-lower".to_owned())
+            .stack_size(LOWERING_STACK)
+            .spawn_scoped(scope, || lower_here(project))
+        {
+            Ok(handle) => handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            // Without a thread, lower on this one.
+            Err(_) => lower_here(project),
+        }
+    })
+}
+
+fn lower_here(project: &Project) -> Result<Lowered, Error> {
     let mut targets: Vec<&thatch_sb3::Target> = project.targets.iter().filter(|t| !t.is_stage).collect();
     targets.sort_by_key(|t| t.layer_order);
     let stage = project.stage().ok_or(Error::NoStage)?;
@@ -212,6 +232,9 @@ struct Lowerer<'a> {
     /// The blocks being lowered right now, from the script's top down to the current block, to
     /// notice a block that leads back to itself.
     visiting: HashSet<String>,
+    /// How many stacks and reporters the lowering is inside, which is how deep it recurses. A
+    /// long flat script counts once, however many blocks follow one another.
+    depth: usize,
 }
 
 impl<'a> Lowerer<'a> {
@@ -228,6 +251,7 @@ impl<'a> Lowerer<'a> {
             proc: None,
             nesting: 0,
             visiting: HashSet::new(),
+            depth: 0,
         }
     }
 
@@ -238,14 +262,24 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Marks a block as being lowered, or records a cycle when it already is. `visiting` holds the
-    /// blocks being lowered from the hat down to this one, so its size is the nesting depth, which
-    /// is bounded so that a deeply nested project is an error and not a stack overflow.
-    fn enter(&mut self, id: &str) -> bool {
-        if self.visiting.len() >= MAX_NESTING {
+    /// Goes one level deeper, into a stack or a reporter starting at block `id`, or records that the
+    /// project nests too deeply. The bound makes a deeply nested project an error and not a stack
+    /// overflow. Pair it with [`Lowerer::shallower`].
+    fn deeper(&mut self, id: &str) -> bool {
+        if self.depth >= MAX_NESTING {
             self.fail(Error::TooDeep { target: self.targets[self.target].name.clone(), block: id.to_owned() });
             return false;
         }
+        self.depth += 1;
+        true
+    }
+
+    fn shallower(&mut self) {
+        self.depth -= 1;
+    }
+
+    /// Marks a block as being lowered, or records a cycle when it already is.
+    fn enter(&mut self, id: &str) -> bool {
         if !self.visiting.insert(id.to_owned()) {
             self.fail(Error::Cycle { target: self.targets[self.target].name.clone(), block: id.to_owned() });
             return false;
@@ -371,8 +405,12 @@ impl<'a> Lowerer<'a> {
 
     fn lower_stack(&mut self, first: Option<&str>) -> Vec<Stmt> {
         let mut stmts = Vec::new();
+        let Some(first) = first else { return stmts };
+        if !self.deeper(first) {
+            return stmts;
+        }
         let mut chain = Vec::new();
-        let mut next = first.map(str::to_owned);
+        let mut next = Some(first.to_owned());
         while let Some(id) = next {
             let Some(block) = self.block(&id) else { break };
             if self.error.is_some() || !self.enter(&id) {
@@ -385,6 +423,7 @@ impl<'a> Lowerer<'a> {
         for id in chain {
             self.leave(&id);
         }
+        self.shallower();
         stmts
     }
 
@@ -654,11 +693,16 @@ impl<'a> Lowerer<'a> {
             self.warn(id, "an input refers to a block that does not exist; it reports 0".to_owned());
             return Expr::Num(0.0);
         };
-        if self.error.is_some() || !self.enter(id) {
+        if self.error.is_some() || !self.deeper(id) {
+            return Expr::Num(0.0);
+        }
+        if !self.enter(id) {
+            self.shallower();
             return Expr::Num(0.0);
         }
         let e = self.reporter_block(id, block);
         self.leave(id);
+        self.shallower();
         e
     }
 
@@ -898,18 +942,27 @@ mod tests {
 
     #[test]
     fn deep_nesting_is_an_error_not_a_crash() {
-        // Lowering recurses once per level, which needs more than a test thread's stack in a debug
-        // build, so this runs on a stack as big as the one the `thatch` command gives the compiler.
-        std::thread::Builder::new()
-            .stack_size(256 << 20)
-            .spawn(|| {
-                // The hat and the `say` count too.
-                assert!(lower(&nested_adds(MAX_NESTING - 2)).is_ok());
-                let err = lower(&nested_adds(MAX_NESTING + 10)).unwrap_err();
-                assert!(matches!(err, Error::TooDeep { .. }), "{err}");
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        // This runs on a test thread's small stack: `lower` gives itself a large one. The script's
+        // stack is one level and the `+` chain the rest.
+        assert!(lower(&nested_adds(MAX_NESTING - 1)).is_ok());
+        let err = lower(&nested_adds(MAX_NESTING)).unwrap_err();
+        assert!(matches!(err, Error::TooDeep { .. }), "{err}");
+    }
+
+    #[test]
+    fn long_flat_scripts_are_not_deep() {
+        let mut blocks = vec![
+            r#""h":{"opcode":"event_whenflagclicked","next":"s0","parent":null,"inputs":{},"fields":{},"topLevel":true}"#
+                .to_owned(),
+        ];
+        let count = MAX_NESTING * 5;
+        for i in 0..count {
+            let next = if i + 1 < count { format!(r#""s{}""#, i + 1) } else { "null".to_owned() };
+            blocks.push(format!(
+                r#""s{i}":{{"opcode":"looks_say","next":{next},"parent":"h","inputs":{{"MESSAGE":[1,[10,"hi"]]}},"fields":{{}},"topLevel":false}}"#
+            ));
+        }
+        let lowered = lower(&project(&format!("{{{}}}", blocks.join(",")), "{}")).unwrap();
+        assert_eq!(lowered.program.functions[0].body.len(), count);
     }
 }
