@@ -172,7 +172,10 @@ const CLICKS: &str = r#"{"targets":[
     "ks":{"opcode":"looks_say","next":null,"parent":"k","inputs":{"MESSAGE":[1,[10,"left"]]},"fields":{},"topLevel":false},
     "r":{"opcode":"event_whenkeypressed","next":"rs","parent":null,"inputs":{},"fields":{"KEY_OPTION":["right arrow",null]},"topLevel":true},
     "rs":{"opcode":"looks_say","next":"rf","parent":"r","inputs":{"MESSAGE":[1,[10,"right"]]},"fields":{},"topLevel":false},
-    "rf":{"opcode":"control_forever","next":null,"parent":"rs","inputs":{},"fields":{},"topLevel":false}}},
+    "rf":{"opcode":"control_forever","next":null,"parent":"rs","inputs":{},"fields":{},"topLevel":false},
+    "x":{"opcode":"event_whenkeypressed","next":"xs","parent":null,"inputs":{},"fields":{"KEY_OPTION":["s",null]},"topLevel":true},
+    "xs":{"opcode":"control_stop","next":null,"parent":"x","inputs":{},"fields":{"STOP_OPTION":["other scripts in sprite",null]},"topLevel":false,
+      "mutation":{"tagName":"mutation","children":[],"hasnext":"true"}}}},
   {"isStage":false,"name":"Dog","layerOrder":2,"draggable":true,"costumes":[{"name":"d"}],"blocks":{
     "h":{"opcode":"event_whenthisspriteclicked","next":"s","parent":null,"inputs":{},"fields":{},"topLevel":true},
     "s":{"opcode":"looks_say","next":null,"parent":"h","inputs":{"MESSAGE":[1,[10,"dog"]]},"fields":{},"topLevel":false}}}
@@ -270,6 +273,16 @@ fn clicks_and_keys_start_the_right_hats() {
         api::thatch_runtime_key(rt, c"ArrowRight".as_ptr(), 10, 1);
         frame(rt);
         assert_eq!(said, ["right", "any", "any", "right", "any"]);
+        // `stop other scripts in sprite` kills the running right-arrow script after it has stepped
+        // in this frame, so it waits for the next one to finish. Two presses before then start one
+        // new copy, not one per press.
+        said.clear();
+        api::thatch_runtime_key(rt, c"s".as_ptr(), 1, 1);
+        frame(rt);
+        api::thatch_runtime_key(rt, c"ArrowRight".as_ptr(), 10, 1);
+        api::thatch_runtime_key(rt, c"ArrowRight".as_ptr(), 10, 1);
+        frame(rt);
+        assert_eq!(said, ["any", "right", "any"]);
         api::thatch_runtime_mouse_move(rt, 1000.0, -33.5);
         api::thatch_runtime_destroy(rt);
     }

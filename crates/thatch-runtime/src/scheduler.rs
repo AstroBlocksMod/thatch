@@ -366,13 +366,14 @@ impl Runtime {
                 if s.hat != hat || s.arg != wanted && (hat == HAT_BROADCAST || hat == HAT_KEY) {
                     continue;
                 }
-                let existing = self.threads.iter().position(|t| t.target == target && t.script == script && !t.stopped);
-                // A killed thread counts as done, as scratch-vm retires a stopped thread at once.
-                if !restart
-                    && existing.is_some_and(|i| self.threads[i].status != Status::Done && !self.threads[i].killed)
-                {
+                let same = |t: &Thread| t.target == target && t.script == script && !t.stopped;
+                // A key hat starts nothing while any thread of the script still runs. A killed one
+                // counts as done, as scratch-vm retires a stopped thread at once, but a killed one
+                // waiting to finish may sit in front of the live copy a later press started.
+                if !restart && self.threads.iter().any(|t| same(t) && t.status != Status::Done && !t.killed) {
                     continue;
                 }
+                let existing = self.threads.iter().position(same);
                 let thread = self.new_thread(target, script);
                 started.push(thread.id);
                 match existing {
