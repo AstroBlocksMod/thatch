@@ -1,0 +1,9 @@
+Cat says: 17
+Cat says: 0x104
+Cat says: Infinitytrue
+Cat says: NaNfalse
+Cat says: falsetrue
+Cat says: 1e+23
+Cat says: 1e-7!
+Cat says: l
+Cat says: -30.5

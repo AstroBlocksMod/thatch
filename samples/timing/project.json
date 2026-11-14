@@ -1,0 +1,63 @@
+{
+  "targets": [
+    {
+      "isStage": true,
+      "name": "Stage",
+      "variables": { "v_ticks": ["ticks", 0] },
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {},
+      "currentCostume": 0,
+      "costumes": [{ "name": "backdrop1", "assetId": "cd21514d0531fdffb22204e0ec5ed84a", "md5ext": "cd21514d0531fdffb22204e0ec5ed84a.svg", "dataFormat": "svg", "rotationCenterX": 240, "rotationCenterY": 180 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 0,
+      "tempo": 60,
+      "videoTransparency": 50,
+      "videoState": "off"
+    },
+    {
+      "isStage": false,
+      "name": "Cat",
+      "variables": {},
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {
+        "flagLoop": { "opcode": "event_whenflagclicked", "next": "forever", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 0 },
+        "forever": { "opcode": "control_forever", "next": null, "parent": "flagLoop", "inputs": { "SUBSTACK": [2, "tick"] }, "fields": {}, "shadow": false, "topLevel": false },
+        "tick": { "opcode": "data_changevariableby", "next": "waitTick", "parent": "forever", "inputs": { "VALUE": [1, [4, "1"]] }, "fields": { "VARIABLE": ["ticks", "v_ticks"] }, "shadow": false, "topLevel": false },
+        "waitTick": { "opcode": "control_wait", "next": null, "parent": "tick", "inputs": { "DURATION": [1, [5, "0"]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "flagSide": { "opcode": "event_whenflagclicked", "next": "waitSide", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 300 },
+        "waitSide": { "opcode": "control_wait", "next": "saySide", "parent": "flagSide", "inputs": { "DURATION": [1, [5, "0.25"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "saySide": { "opcode": "looks_say", "next": null, "parent": "waitSide", "inputs": { "MESSAGE": [1, [10, "side script after a quarter second"]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "flagMain": { "opcode": "event_whenflagclicked", "next": "sayFor", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 600 },
+        "sayFor": { "opcode": "looks_sayforsecs", "next": "sayDone", "parent": "flagMain", "inputs": { "MESSAGE": [1, [10, "waiting"]], "SECS": [1, [4, "0.5"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayDone": { "opcode": "looks_say", "next": "waitTicks", "parent": "sayFor", "inputs": { "MESSAGE": [1, [10, "done waiting"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "waitTicks": { "opcode": "control_wait_until", "next": "sayTicked", "parent": "sayDone", "inputs": { "CONDITION": [2, "ticksGt5"] }, "fields": {}, "shadow": false, "topLevel": false },
+        "ticksGt5": { "opcode": "operator_gt", "next": null, "parent": "waitTicks", "inputs": { "OPERAND1": [3, [12, "ticks", "v_ticks"], [10, ""]], "OPERAND2": [1, [10, "5"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayTicked": { "opcode": "looks_say", "next": "resetTimer", "parent": "waitTicks", "inputs": { "MESSAGE": [1, [10, "the loop kept ticking"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "resetTimer": { "opcode": "sensing_resettimer", "next": "waitUntil", "parent": "sayTicked", "inputs": {}, "fields": {}, "shadow": false, "topLevel": false },
+        "waitUntil": { "opcode": "control_wait_until", "next": "sayTimer", "parent": "resetTimer", "inputs": { "CONDITION": [2, "timerGt"] }, "fields": {}, "shadow": false, "topLevel": false },
+        "timerGt": { "opcode": "operator_gt", "next": null, "parent": "waitUntil", "inputs": { "OPERAND1": [3, "timer", [10, ""]], "OPERAND2": [1, [10, "0.2"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "timer": { "opcode": "sensing_timer", "next": null, "parent": "timerGt", "inputs": {}, "fields": {}, "shadow": false, "topLevel": false },
+        "sayTimer": { "opcode": "looks_say", "next": "repUntil", "parent": "waitUntil", "inputs": { "MESSAGE": [1, [10, "timer passed 0.2"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "repUntil": { "opcode": "control_repeat_until", "next": "sayStop", "parent": "sayTimer", "inputs": { "CONDITION": [2, "ticksGt40"], "SUBSTACK": [2, "waitIn"] }, "fields": {}, "shadow": false, "topLevel": false },
+        "ticksGt40": { "opcode": "operator_gt", "next": null, "parent": "repUntil", "inputs": { "OPERAND1": [3, [12, "ticks", "v_ticks"], [10, ""]], "OPERAND2": [1, [10, "40"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "waitIn": { "opcode": "control_wait", "next": null, "parent": "repUntil", "inputs": { "DURATION": [1, [5, "0.1"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayStop": { "opcode": "looks_say", "next": "stopAll", "parent": "repUntil", "inputs": { "MESSAGE": [1, [10, "stopping everything"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "stopAll": { "opcode": "control_stop", "next": null, "parent": "sayStop", "inputs": {}, "fields": { "STOP_OPTION": ["all", null] }, "shadow": false, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "hasnext": "false" } }
+      },
+      "currentCostume": 0,
+      "costumes": [{ "name": "costume1", "assetId": "bcf454acf82e4504149f7ffe07081dbc", "md5ext": "bcf454acf82e4504149f7ffe07081dbc.svg", "dataFormat": "svg", "rotationCenterX": 48, "rotationCenterY": 50 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 1,
+      "visible": true, "x": 0, "y": 0, "size": 100, "direction": 90, "draggable": false, "rotationStyle": "all around"
+    }
+  ],
+  "monitors": [],
+  "extensions": [],
+  "meta": { "semver": "3.0.0", "vm": "0.2.0", "agent": "" }
+}

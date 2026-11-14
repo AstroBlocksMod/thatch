@@ -1,0 +1,15 @@
+[package]
+name = "thatch-sb3"
+description = "Reads Scratch 3 project files into a typed model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+zip.workspace = true
+
+[lints]
+workspace = true

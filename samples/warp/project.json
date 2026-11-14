@@ -1,0 +1,65 @@
+{
+  "targets": [
+    {
+      "isStage": true,
+      "name": "Stage",
+      "variables": {},
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {},
+      "currentCostume": 0,
+      "costumes": [{ "name": "backdrop1", "assetId": "cd21514d0531fdffb22204e0ec5ed84a", "md5ext": "cd21514d0531fdffb22204e0ec5ed84a.svg", "dataFormat": "svg", "rotationCenterX": 240, "rotationCenterY": 180 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 0,
+      "tempo": 60,
+      "videoTransparency": 50,
+      "videoState": "off"
+    },
+    {
+      "isStage": false,
+      "name": "Cat",
+      "variables": { "v_x": ["x", 0] },
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {
+        "flagA": { "opcode": "event_whenflagclicked", "next": "callSpin", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 0 },
+        "callSpin": { "opcode": "procedures_call", "next": "saySpin", "parent": "flagA", "inputs": {}, "fields": {}, "shadow": false, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "proccode": "spin until x is set", "argumentids": "[]", "warp": "true" } },
+        "saySpin": { "opcode": "looks_say", "next": "callForever", "parent": "callSpin", "inputs": { "MESSAGE": [1, [10, "spin done"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "callForever": { "opcode": "procedures_call", "next": null, "parent": "saySpin", "inputs": {}, "fields": {}, "shadow": false, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "proccode": "spin forever", "argumentids": "[]", "warp": "true" } },
+
+        "flagB": { "opcode": "event_whenflagclicked", "next": "waitB1", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 300 },
+        "waitB1": { "opcode": "control_wait", "next": "setX", "parent": "flagB", "inputs": { "DURATION": [1, [5, "0"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "setX": { "opcode": "data_setvariableto", "next": "sayB", "parent": "waitB1", "inputs": { "VALUE": [1, [10, "5"]] }, "fields": { "VARIABLE": ["x", "v_x"] }, "shadow": false, "topLevel": false },
+        "sayB": { "opcode": "looks_say", "next": "waitB2", "parent": "setX", "inputs": { "MESSAGE": [1, [10, "B set x"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "waitB2": { "opcode": "control_wait", "next": "sayStop", "parent": "sayB", "inputs": { "DURATION": [1, [5, "0"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayStop": { "opcode": "looks_say", "next": "stopAll", "parent": "waitB2", "inputs": { "MESSAGE": [1, [10, "stopping"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "stopAll": { "opcode": "control_stop", "next": null, "parent": "sayStop", "inputs": {}, "fields": { "STOP_OPTION": ["all", null] }, "shadow": false, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "hasnext": "false" } },
+
+        "defSpin": { "opcode": "procedures_definition", "next": "untilX", "parent": null, "inputs": { "custom_block": [1, "protoSpin"] }, "fields": {}, "shadow": false, "topLevel": true, "x": 400, "y": 0 },
+        "protoSpin": { "opcode": "procedures_prototype", "next": null, "parent": "defSpin", "inputs": {}, "fields": {}, "shadow": true, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "proccode": "spin until x is set", "argumentids": "[]", "argumentnames": "[]", "argumentdefaults": "[]", "warp": "true" } },
+        "untilX": { "opcode": "control_repeat_until", "next": null, "parent": "defSpin", "inputs": { "CONDITION": [2, "xGt3"] }, "fields": {}, "shadow": false, "topLevel": false },
+        "xGt3": { "opcode": "operator_gt", "next": null, "parent": "untilX", "inputs": { "OPERAND1": [3, [12, "x", "v_x"], [10, ""]], "OPERAND2": [1, [10, "3"]] }, "fields": {}, "shadow": false, "topLevel": false },
+
+        "defForever": { "opcode": "procedures_definition", "next": "forever", "parent": null, "inputs": { "custom_block": [1, "protoForever"] }, "fields": {}, "shadow": false, "topLevel": true, "x": 800, "y": 0 },
+        "protoForever": { "opcode": "procedures_prototype", "next": null, "parent": "defForever", "inputs": {}, "fields": {}, "shadow": true, "topLevel": false, "mutation": { "tagName": "mutation", "children": [], "proccode": "spin forever", "argumentids": "[]", "argumentnames": "[]", "argumentdefaults": "[]", "warp": "true" } },
+        "forever": { "opcode": "control_forever", "next": null, "parent": "defForever", "inputs": {}, "fields": {}, "shadow": false, "topLevel": false }
+      },
+      "currentCostume": 0,
+      "costumes": [{ "name": "costume1", "assetId": "bcf454acf82e4504149f7ffe07081dbc", "md5ext": "bcf454acf82e4504149f7ffe07081dbc.svg", "dataFormat": "svg", "rotationCenterX": 48, "rotationCenterY": 50 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 1,
+      "visible": true,
+      "x": 0,
+      "y": 0,
+      "size": 100,
+      "direction": 90,
+      "draggable": false,
+      "rotationStyle": "all around"
+    }
+  ],
+  "monitors": [],
+  "extensions": [],
+  "meta": { "semver": "3.0.0", "vm": "0.2.0", "agent": "" }
+}

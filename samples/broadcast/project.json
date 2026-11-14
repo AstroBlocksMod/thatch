@@ -1,0 +1,85 @@
+{
+  "targets": [
+    {
+      "isStage": true,
+      "name": "Stage",
+      "variables": {},
+      "lists": {},
+      "broadcasts": { "b_go": "go", "b_again": "again" },
+      "blocks": {},
+      "currentCostume": 0,
+      "costumes": [{ "name": "backdrop1", "assetId": "cd21514d0531fdffb22204e0ec5ed84a", "md5ext": "cd21514d0531fdffb22204e0ec5ed84a.svg", "dataFormat": "svg", "rotationCenterX": 240, "rotationCenterY": 180 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 0,
+      "tempo": 60,
+      "videoTransparency": 50,
+      "videoState": "off"
+    },
+    {
+      "isStage": false,
+      "name": "A",
+      "variables": {},
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {
+        "flag": { "opcode": "event_whenflagclicked", "next": "sayStart", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 0 },
+        "sayStart": { "opcode": "looks_say", "next": "bc1", "parent": "flag", "inputs": { "MESSAGE": [1, [10, "A start"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "bc1": { "opcode": "event_broadcast", "next": "sayAfter", "parent": "sayStart", "inputs": { "BROADCAST_INPUT": [1, [11, "go", "b_go"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayAfter": { "opcode": "looks_say", "next": "bcw", "parent": "bc1", "inputs": { "MESSAGE": [1, [10, "A after broadcast"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "bcw": { "opcode": "event_broadcastandwait", "next": "sayWait", "parent": "sayAfter", "inputs": { "BROADCAST_INPUT": [1, [11, "go", "b_go"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayWait": { "opcode": "looks_say", "next": "bc2", "parent": "bcw", "inputs": { "MESSAGE": [1, [10, "A after wait"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "bc2": { "opcode": "event_broadcast", "next": "sayEnd", "parent": "sayWait", "inputs": { "BROADCAST_INPUT": [3, "joinName", [11, "go", "b_go"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "joinName": { "opcode": "operator_join", "next": null, "parent": "bc2", "inputs": { "STRING1": [1, [10, "AGA"]], "STRING2": [1, [10, "in"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayEnd": { "opcode": "looks_say", "next": null, "parent": "bc2", "inputs": { "MESSAGE": [1, [10, "A end"]] }, "fields": {}, "shadow": false, "topLevel": false }
+      },
+      "currentCostume": 0,
+      "costumes": [{ "name": "costume1", "assetId": "bcf454acf82e4504149f7ffe07081dbc", "md5ext": "bcf454acf82e4504149f7ffe07081dbc.svg", "dataFormat": "svg", "rotationCenterX": 48, "rotationCenterY": 50 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 1,
+      "visible": true, "x": 0, "y": 0, "size": 100, "direction": 90, "draggable": false, "rotationStyle": "all around"
+    },
+    {
+      "isStage": false,
+      "name": "B",
+      "variables": {},
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {
+        "recv": { "opcode": "event_whenbroadcastreceived", "next": "sayGot", "parent": null, "inputs": {}, "fields": { "BROADCAST_OPTION": ["go", "b_go"] }, "shadow": false, "topLevel": true, "x": 0, "y": 0 },
+        "sayGot": { "opcode": "looks_say", "next": "wait", "parent": "recv", "inputs": { "MESSAGE": [1, [10, "B got go"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "wait": { "opcode": "control_wait", "next": "sayDone", "parent": "sayGot", "inputs": { "DURATION": [1, [5, "0.1"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "sayDone": { "opcode": "looks_say", "next": null, "parent": "wait", "inputs": { "MESSAGE": [1, [10, "B done"]] }, "fields": {}, "shadow": false, "topLevel": false },
+        "recv2": { "opcode": "event_whenbroadcastreceived", "next": "sayAgain", "parent": null, "inputs": {}, "fields": { "BROADCAST_OPTION": ["again", "b_again"] }, "shadow": false, "topLevel": true, "x": 0, "y": 300 },
+        "sayAgain": { "opcode": "looks_say", "next": null, "parent": "recv2", "inputs": { "MESSAGE": [1, [10, "B got again"]] }, "fields": {}, "shadow": false, "topLevel": false }
+      },
+      "currentCostume": 0,
+      "costumes": [{ "name": "costume1", "assetId": "bcf454acf82e4504149f7ffe07081dbc", "md5ext": "bcf454acf82e4504149f7ffe07081dbc.svg", "dataFormat": "svg", "rotationCenterX": 48, "rotationCenterY": 50 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 2,
+      "visible": true, "x": 0, "y": 0, "size": 100, "direction": 90, "draggable": false, "rotationStyle": "all around"
+    },
+    {
+      "isStage": false,
+      "name": "C",
+      "variables": {},
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {
+        "recv": { "opcode": "event_whenbroadcastreceived", "next": "sayGot", "parent": null, "inputs": {}, "fields": { "BROADCAST_OPTION": ["go", "b_go"] }, "shadow": false, "topLevel": true, "x": 0, "y": 0 },
+        "sayGot": { "opcode": "looks_say", "next": null, "parent": "recv", "inputs": { "MESSAGE": [1, [10, "C got go"]] }, "fields": {}, "shadow": false, "topLevel": false }
+      },
+      "currentCostume": 0,
+      "costumes": [{ "name": "costume1", "assetId": "bcf454acf82e4504149f7ffe07081dbc", "md5ext": "bcf454acf82e4504149f7ffe07081dbc.svg", "dataFormat": "svg", "rotationCenterX": 48, "rotationCenterY": 50 }],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 3,
+      "visible": true, "x": 0, "y": 0, "size": 100, "direction": 90, "draggable": false, "rotationStyle": "all around"
+    }
+  ],
+  "monitors": [],
+  "extensions": [],
+  "meta": { "semver": "3.0.0", "vm": "0.2.0", "agent": "" }
+}

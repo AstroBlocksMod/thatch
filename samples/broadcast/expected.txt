@@ -1,0 +1,8 @@
+A says: A start
+A says: A after broadcast
+C says: C got go
+B says: B got go
+B says: B done
+A says: A after wait
+A says: A end
+B says: B got again

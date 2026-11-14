@@ -1,0 +1,15 @@
+Cat says: score: 1
+Cat says: score: 2
+Cat says: score: 3
+Cat says: 0.33
+Cat says: 0.30
+Cat says: three
+Cat says: T6
+Cat says: true
+Cat says: 3
+Cat says: 2
+Cat says: 4
+Cat says: 3.14159
+Cat says: false
+Cat thinks: -0.50
+Cat says: false
