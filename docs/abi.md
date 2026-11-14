@@ -101,14 +101,15 @@ flowchart TD
     frame --> redraw{"thatch_runtime_redraw_requested(rt)?"}
     redraw -->|yes| draw["thatch_runtime_draw_order, then thatch_runtime_sprite for each target, and draw"] --> input
     redraw -->|no| input["report keys and the mouse: thatch_runtime_key, thatch_runtime_mouse_move, thatch_runtime_mouse_button"]
-    input --> more{"thatch_runtime_has_threads(rt)?"}
+    input --> more{"keep running?"}
     more -->|yes| frame
     more -->|no| destroy["thatch_runtime_destroy(rt)"]
 ```
 
+When to stop is the host's call. A host with a window runs a frame every thirtieth of a second until the player closes it, scripts or no scripts, since a key press or a click can start a script at any time. The headless host has no player, so it stops once `thatch_runtime_has_threads` is false and no input from its script is still to come.
+
 To draw, a host asks `thatch_runtime_draw_order` for the targets back to front (the stage first) and `thatch_runtime_sprite` for each one's `ThatchSprite`: position, direction and rotation style, size in percent, costume index (into the costumes the program registered, whose names `thatch_runtime_costume_count` and `thatch_runtime_costume_name` give back), visibility and the seven graphic effects in Scratch's order. The runtime keeps the direction as Scratch shows it, from -179 to 180 with 90 pointing right; the host applies the rotation style when it draws, as scratch-vm's renderer does.
 
-<<<<<<< HEAD
 `thatch_runtime_create` takes the ABI version the host was compiled with and returns null for any other, since a host built against another header passes a `ThatchHost` of another size. `thatch_runtime_load` returns `THATCH_LOAD_WRONG_ABI_VERSION` or `THATCH_LOAD_NO_STAGE` instead of `THATCH_LOAD_OK` when the program cannot run, and leaves the runtime as empty as it was created. A runtime holds one program, so a second load returns `THATCH_LOAD_ALREADY_LOADED` and changes nothing. `thatch_runtime_frame` returns nonzero after an error that `thatch_runtime_last_error` describes, after which the runtime may only be destroyed. `thatch_runtime_target_count`, `thatch_runtime_target_name` and `thatch_runtime_target_is_stage` describe the program's targets, so the `say` callback can name the sprite. A callback may call these and the other `thatch_runtime_*` functions that only read. Nothing is thread-safe: one runtime belongs to one thread, and the host may only call into it between frames and from its callbacks.
 
 `thatch_runtime_redraw_requested` tells the host when to draw: after a frame in which something changed what the stage shows or asked for a redraw, after the host itself changed something between frames (`thatch_runtime_stop_all` clearing bubbles, for one), and once after loading. The scheduler keeps its own flag, cleared at the start of every frame, which ends a frame early as scratch-vm's redraw request does.
