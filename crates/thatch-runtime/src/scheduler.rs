@@ -77,9 +77,14 @@ pub struct Runtime {
     /// The host's callbacks. `data` is the host's; the runtime only passes it back.
     pub(crate) host: Host,
     pub targets: Vec<Box<Target>>,
-    /// Target indices in drawing order, the stage first and the frontmost sprite last. Hats start
-    /// in the reverse of this order, so the layer blocks change it.
+    /// Target indices in scratch-vm's executable order, which starts as the drawing order, the
+    /// stage first and the frontmost sprite last. Hats start in the reverse of this order, so the
+    /// layer blocks change it, by scratch-vm's `moveExecutable` rules.
     pub order: Vec<usize>,
+    /// Target indices in drawing order, back to front, as the renderer keeps them: the layer blocks
+    /// move a sprite here by scratch-render's rules, which keep the stage at the back. A fractional
+    /// layer move can leave this differing from `order`, as in scratch-vm.
+    pub draw_order: Vec<usize>,
     /// The mouse in Scratch coordinates, as the host last reported it.
     pub mouse_x: f64,
     pub mouse_y: f64,
@@ -115,6 +120,7 @@ impl Runtime {
             host,
             targets: Vec::new(),
             order: Vec::new(),
+            draw_order: Vec::new(),
             mouse_x: 0.0,
             mouse_y: 0.0,
             consts: Vec::new(),
@@ -181,9 +187,11 @@ impl Runtime {
         let index = self.targets.len() - 1;
         // The stage is drawn first whatever order it was registered in.
         if is_stage {
-            self.order.insert(0, index)
+            self.order.insert(0, index);
+            self.draw_order.insert(0, index);
         } else {
-            self.order.push(index)
+            self.order.push(index);
+            self.draw_order.push(index);
         }
         index
     }
@@ -248,6 +256,8 @@ impl Runtime {
     pub(crate) fn unload(&mut self) {
         self.release_variables();
         self.targets.clear();
+        self.order.clear();
+        self.draw_order.clear();
         self.consts.clear();
         self.const_ptrs.clear();
     }

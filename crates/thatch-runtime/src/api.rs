@@ -302,11 +302,11 @@ pub unsafe extern "C" fn thatch_runtime_draw_order(rt: *const OpaqueRuntime, tar
     unsafe {
         let r = &*rt.cast::<Runtime>();
         if !targets.is_null() {
-            for (i, t) in r.order.iter().take(cap).enumerate() {
+            for (i, t) in r.draw_order.iter().take(cap).enumerate() {
                 *targets.add(i) = *t as i64;
             }
         }
-        r.order.len()
+        r.draw_order.len()
     }
 }
 

@@ -475,23 +475,45 @@ impl Rt {
         self.changed(target, visible);
     }
 
-    /// `moveExecutable`: moves a sprite `delta` layers forward (positive) or back in the drawing
-    /// order, which is also the reverse of the order hats start in. scratch-render's
-    /// `setDrawableOrder` clamps the new index between the first sprite layer, just in front of the
-    /// stage, and the front, then truncates it as `Array.prototype.splice` does, so a fractional or
-    /// infinite `delta` behaves as it does there. A NaN `delta`, which no block passes since they
-    /// cast their input to a number first, keeps the sprite where the stage stays at the back.
+    /// The layer blocks: move a sprite `delta` layers forward (positive) or back, in both orders
+    /// scratch-vm keeps, each by its own rules.
+    ///
+    /// The executable order, whose reverse is the order hats start in, follows scratch-vm's
+    /// `moveExecutable`: the new index is capped at the front, and one at or below 0 goes just in
+    /// front of the stage, but a fraction such as 0.5 is truncated by `Array.prototype.splice`
+    /// after that check, so it can put the sprite ahead of the stage there.
+    ///
+    /// The drawing order follows scratch-render's `setDrawableOrder`, which clamps the new index
+    /// between the first sprite layer and the front before truncating it, so the stage is always
+    /// drawn first. A NaN `delta`, which no block passes since they cast their input to a number
+    /// first, keeps the sprite in front of the stage in both.
     pub fn move_layer(self, target: usize, delta: f64) {
         let moved = self.with(|r| {
             if r.targets[target].is_stage {
                 return false;
             }
-            let Some(old) = r.order.iter().position(|t| *t == target) else { return false };
-            r.order.remove(old);
-            let min = if r.order.first().is_some_and(|t| r.targets[*t].is_stage) { 1.0 } else { 0.0 };
-            let index = js_min(js_max(old as f64 + delta, min), r.order.len() as f64);
+            let stage_first = |r: &Runtime, order: &[usize]| order.first().is_some_and(|t| r.targets[*t].is_stage);
+            if let Some(old) = r.order.iter().position(|t| *t == target) {
+                let mut order = std::mem::take(&mut r.order);
+                order.remove(old);
+                let mut index = old as f64 + delta;
+                if index > order.len() as f64 {
+                    index = order.len() as f64;
+                }
+                if index <= 0.0 || index.is_nan() {
+                    index = if stage_first(r, &order) { 1.0 } else { 0.0 };
+                }
+                order.insert((index.trunc() as usize).min(order.len()), target);
+                r.order = order;
+            }
+            let Some(old) = r.draw_order.iter().position(|t| *t == target) else { return true };
+            let mut order = std::mem::take(&mut r.draw_order);
+            order.remove(old);
+            let min = if stage_first(r, &order) { 1.0 } else { 0.0 };
+            let index = js_min(js_max(old as f64 + delta, min), order.len() as f64);
             let index = if index.is_nan() { min } else { index };
-            r.order.insert((index.trunc() as usize).min(r.order.len()), target);
+            order.insert((index.trunc() as usize).min(order.len()), target);
+            r.draw_order = order;
             true
         });
         // The renderer reorders too, but nothing asks for a redraw.
@@ -591,18 +613,21 @@ mod tests {
                 r.add_target("Cat".into(), false);
                 r.add_target("Dog".into(), false);
             });
-            let order = || handle.with(|r| r.order.clone());
-            // Half a layer back from just in front of the stage stays there, as does NaN.
+            // The executable order, then the drawing order.
+            let orders = || handle.with(|r| (r.order.clone(), r.draw_order.clone()));
+            // Half a layer back from just in front of the stage: `moveExecutable` truncates 0.5 to
+            // 0 after its check, so the Cat's hats now start after the stage's, but the renderer
+            // keeps drawing the stage first.
             handle.move_layer(1, -0.5);
-            assert_eq!(order(), [0, 1, 2]);
+            assert_eq!(orders(), (vec![1, 0, 2], vec![0, 1, 2]));
             handle.move_layer(1, f64::NAN);
-            assert_eq!(order(), [0, 1, 2]);
+            assert_eq!(orders(), (vec![0, 1, 2], vec![0, 1, 2]));
             handle.move_layer(1, 1.5);
-            assert_eq!(order(), [0, 2, 1]);
+            assert_eq!(orders(), (vec![0, 2, 1], vec![0, 2, 1]));
             handle.go_to_layer(1, false);
-            assert_eq!(order(), [0, 1, 2]);
+            assert_eq!(orders(), (vec![0, 1, 2], vec![0, 1, 2]));
             handle.move_layer(0, 5.0);
-            assert_eq!(order(), [0, 1, 2], "the stage does not move");
+            assert_eq!(orders(), (vec![0, 1, 2], vec![0, 1, 2]), "the stage does not move");
             Runtime::destroy(rt);
         }
     }
