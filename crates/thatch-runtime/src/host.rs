@@ -81,7 +81,7 @@ pub fn run(init: InitFn, abi_version: u32, options: &RunOptions) -> Result<RunRe
     // SAFETY: `host` outlives the runtime, which is created and destroyed here, and the runtime is
     // only touched between frames through the C API.
     unsafe {
-        let rt = api::thatch_runtime_create(&raw const host, seed);
+        let rt = api::thatch_runtime_create(thatch_abi::ABI_VERSION as i32, &raw const host, seed);
         let result = run_program(rt, init, abi_version, options);
         api::thatch_runtime_destroy(rt);
         result.map(|frames| RunReport { frames, says: headless.says })

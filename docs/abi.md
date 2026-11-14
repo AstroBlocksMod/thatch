@@ -73,18 +73,21 @@ Then it drives the runtime through the `thatch_runtime_*` functions:
 
 ```mermaid
 flowchart TD
-    create["thatch_runtime_create(&host, seed)"] --> load["thatch_runtime_load(rt, thatch_program_abi_version(), thatch_program_init)"]
+    create["thatch_runtime_create(THATCH_ABI_VERSION, &host, seed)"] --> load["thatch_runtime_load(rt, thatch_program_abi_version(), thatch_program_init)"]
     load --> flag["thatch_runtime_green_flag(rt)"]
     flag --> frame["thatch_runtime_frame(rt)"]
     frame --> redraw{"thatch_runtime_redraw_requested(rt)?"}
-    redraw -->|yes| draw["draw the stage"] --> input
-    redraw -->|no| input["read input, call thatch_runtime_start_hats for keys and clicks"]
-    input --> more{"thatch_runtime_has_threads(rt)?"}
+    redraw -->|yes| draw["draw the stage"] --> more
+    redraw -->|no| more{"thatch_runtime_has_threads(rt)?"}
     more -->|yes| frame
     more -->|no| destroy["thatch_runtime_destroy(rt)"]
 ```
 
-`thatch_runtime_load` returns `THATCH_LOAD_WRONG_ABI_VERSION` or `THATCH_LOAD_NO_STAGE` instead of `THATCH_LOAD_OK` when the program cannot run; `thatch_runtime_frame` returns nonzero after an error that `thatch_runtime_last_error` describes. After either, the runtime may only be destroyed. `thatch_runtime_target_count`, `thatch_runtime_target_name` and `thatch_runtime_target_is_stage` describe the program's targets, so the `say` callback can name the sprite. Nothing is thread-safe: one runtime belongs to one thread, and the host may only call into it between frames.
+`thatch_runtime_create` takes the ABI version the host was compiled with and returns null for any other, since a host built against another header passes a `ThatchHost` of another size. `thatch_runtime_load` returns `THATCH_LOAD_WRONG_ABI_VERSION` or `THATCH_LOAD_NO_STAGE` instead of `THATCH_LOAD_OK` when the program cannot run, and leaves the runtime as empty as it was created. A runtime holds one program, so a second load returns `THATCH_LOAD_ALREADY_LOADED` and changes nothing. `thatch_runtime_frame` returns nonzero after an error that `thatch_runtime_last_error` describes, after which the runtime may only be destroyed. `thatch_runtime_target_count`, `thatch_runtime_target_name` and `thatch_runtime_target_is_stage` describe the program's targets, so the `say` callback can name the sprite. A callback may call these and the other `thatch_runtime_*` functions that only read. Nothing is thread-safe: one runtime belongs to one thread, and the host may only call into it between frames and from its callbacks.
+
+`thatch_runtime_redraw_requested` tells the host when to draw: after a frame in which something changed what the stage shows or asked for a redraw, after the host itself changed something between frames (`thatch_runtime_stop_all` clearing bubbles, for one), and once after loading. The scheduler keeps its own flag, cleared at the start of every frame, which ends a frame early as scratch-vm's redraw request does.
+
+`thatch_runtime_green_flag` does what clicking the green flag does: it stops every script and clears every bubble first, then resets the timer and starts the green flag scripts. `thatch_runtime_has_threads` counts only scripts that can still run, not ones a stop has killed but the next frame has yet to finish.
 
 The headless host in `thatch-runtime` is the reference implementation and uses nothing but this API, so every sample run exercises it. A host written in C or C++ such as Scratch Everywhere! implements the same table; what it still lacks is sprite state (position, costume, effects) and the input, pen and sound callbacks, which are the next steps on the [roadmap](roadmap.md). Scratch Everywhere! is LGPL-3.0, so its host lives in a separate repository; nothing from it is part of this one.
 

@@ -38,7 +38,11 @@ int main(int argc, char **argv) {
     host.say = say;
     host.now_ms = NULL; /* the virtual clock, so the output is repeatable */
 
-    rt = thatch_runtime_create(&host, 1);
+    rt = thatch_runtime_create(THATCH_ABI_VERSION, &host, 1);
+    if (rt == NULL) {
+        fprintf(stderr, "the runtime library is for another ABI version than thatch.h\n");
+        return 1;
+    }
     loaded = thatch_runtime_load(rt, thatch_program_abi_version(), thatch_program_init);
     if (loaded != THATCH_LOAD_OK) {
         fprintf(stderr, "the program did not load: %d\n", loaded);

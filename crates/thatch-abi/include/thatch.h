@@ -10,7 +10,8 @@ extern "C" {
 #endif
 
 /* The ABI version this header describes. A program reports the version it was compiled for through
- * thatch_program_abi_version, and thatch_runtime_load refuses any other. */
+ * thatch_program_abi_version, and thatch_runtime_load refuses any other. A host passes it to
+ * thatch_runtime_create, which refuses any other too. */
 #define THATCH_ABI_VERSION 3
 
 /* The runtime. Opaque; create one with thatch_runtime_create. */
@@ -29,6 +30,7 @@ int32_t thatch_program_abi_version(void);
 #define THATCH_LOAD_OK 0
 #define THATCH_LOAD_WRONG_ABI_VERSION 1
 #define THATCH_LOAD_NO_STAGE 2
+#define THATCH_LOAD_ALREADY_LOADED 3
 
 /* Called when a target says or thinks text: UTF-8, len bytes, not NUL-terminated, already cut and
  * formatted as scratch-vm shows it. Empty text clears the bubble. */
@@ -50,15 +52,20 @@ typedef struct ThatchHost {
  * drawing after each one that requested a redraw. Nothing here is thread-safe; one runtime belongs to
  * one thread. */
 
-/* Creates a runtime that reports to `host` (copied) and seeds `pick random` with `seed`. */
-ThatchRuntime *thatch_runtime_create(const ThatchHost *host, uint64_t seed);
+/* Creates a runtime that reports to `host` (copied, or null for no callbacks) and seeds `pick
+ * random` with `seed`. `abi_version` is the THATCH_ABI_VERSION the host was compiled with,
+ * which says how big its ThatchHost is; for any other version this returns null and reads
+ * nothing from `host`. */
+ThatchRuntime *thatch_runtime_create(int32_t abi_version, const ThatchHost *host, uint64_t seed);
 
 /* Checks the program's ABI version (from thatch_program_abi_version) against the runtime's,
  * then lets the program register itself. Returns THATCH_LOAD_OK or a THATCH_LOAD_* error, in
- * which case the runtime is empty and may only be destroyed. */
+ * which case the runtime is left empty, as it was created. A runtime holds one program:
+ * loading another into it gives THATCH_LOAD_ALREADY_LOADED and changes nothing. */
 int32_t thatch_runtime_load(ThatchRuntime *rt, int32_t abi_version, ThatchInitFn init);
 
-/* Resets the timer and starts the green flag scripts. */
+/* Stops every script and clears every bubble, as the stop sign does, then resets the timer and
+ * starts the green flag scripts, as clicking the green flag does. */
 void thatch_runtime_green_flag(ThatchRuntime *rt);
 
 /* Starts every script with the given hat kind (a THATCH_HAT_* value) and argument, such as a
@@ -70,10 +77,12 @@ void thatch_runtime_start_hats(ThatchRuntime *rt, int64_t hat, const char *arg, 
  * thatch_runtime_last_error describes, after which the runtime may only be destroyed. */
 int32_t thatch_runtime_frame(ThatchRuntime *rt);
 
-/* Whether the last frame asked for a redraw: a sprite said something or a wait began. */
+/* Whether the host should draw: something changed what the stage shows (a bubble, for one) or
+ * a wait began, during the last frame or since it ended, or the program was just loaded. */
 int8_t thatch_runtime_redraw_requested(const ThatchRuntime *rt);
 
-/* Whether any script is still running or waiting. */
+/* Whether any script is still running or waiting. Stopped scripts do not count, even before
+ * the next frame lets them finish. */
 int8_t thatch_runtime_has_threads(const ThatchRuntime *rt);
 
 /* How many frames have run. */

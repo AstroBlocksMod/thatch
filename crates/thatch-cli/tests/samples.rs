@@ -44,6 +44,9 @@ fn system_libs() -> &'static [&'static str] {
         &["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"]
     } else if cfg!(target_os = "macos") {
         &["-liconv", "-lSystem", "-lc", "-lm"]
+    } else if cfg!(any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")) {
+        // As `thatch build` links on these systems.
+        &["-lexecinfo", "-lpthread", "-lm", "-lc"]
     } else {
         &["-lpthread", "-lm", "-lc"]
     }
