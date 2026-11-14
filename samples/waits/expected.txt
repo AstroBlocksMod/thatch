@@ -1,0 +1,9 @@
+Cat says: fast starts
+Cat says: fast after wait 0
+Cat says: fast after broadcast
+Dog says: dog 1
+Dog says: dog 2
+Cat says: slow starts
+Cat says: slow after wait 0
+Dog says: dog 3
+Dog says: dog 4

@@ -336,6 +336,20 @@ impl<'a> Lowerer<'a> {
                     let func = self.lower_script(&block, format!("{}/receive {}", target.name, name));
                     scripts.push(Script { hat: Hat::BroadcastReceived(name), func });
                 }
+                "event_whenkeypressed" => {
+                    let key = field_value(&block, "KEY_OPTION").unwrap_or_default();
+                    let func = self.lower_script(&block, format!("{}/key {}", target.name, key));
+                    scripts.push(Script { hat: Hat::KeyPressed(key), func });
+                }
+                "event_whenthisspriteclicked" | "event_whenstageclicked" => {
+                    let func = self.lower_script(&block, format!("{}/clicked {}", target.name, id));
+                    let hat = if block.opcode == "event_whenthisspriteclicked" {
+                        Hat::SpriteClicked
+                    } else {
+                        Hat::StageClicked
+                    };
+                    scripts.push(Script { hat, func });
+                }
                 "procedures_definition" => {
                     if let Some(pi) = self.types.procs[ti].iter().position(|p| p.definition == id) {
                         self.lower_procedure(pi);
@@ -535,7 +549,10 @@ impl<'a> Lowerer<'a> {
             }
             "data_setvariableto" => {
                 let var = self.variable(block);
-                let value = self.input_raw(block, "VALUE", Type::Str);
+                let value = match var {
+                    VarRef::TargetAny(_) | VarRef::StageAny(_) => self.input_dynamic(block, "VALUE"),
+                    _ => self.input_raw(block, "VALUE", Type::Str),
+                };
                 let value = self.store_value(var, value);
                 out.push(Stmt::Set(var, value));
             }
@@ -621,7 +638,7 @@ impl<'a> Lowerer<'a> {
             "looks_show" => out.push(Stmt::Rt(RtStmt::Show, Vec::new())),
             "looks_hide" => out.push(Stmt::Rt(RtStmt::Hide, Vec::new())),
             "looks_switchcostumeto" => {
-                let costume = self.input_raw(block, "COSTUME", Type::Str);
+                let costume = self.input_text(block, "COSTUME");
                 let costume = self.cast(costume, Type::Any);
                 out.push(Stmt::Rt(RtStmt::SwitchCostume, vec![costume]));
             }
@@ -629,7 +646,7 @@ impl<'a> Lowerer<'a> {
             "looks_switchbackdropto" | "looks_switchbackdroptoandwait" => {
                 // Nothing waits yet: the hats a backdrop switch starts are not supported, so
                 // "and wait" has nothing to wait for.
-                let backdrop = self.input_raw(block, "BACKDROP", Type::Str);
+                let backdrop = self.input_text(block, "BACKDROP");
                 let backdrop = self.cast(backdrop, Type::Any);
                 out.push(Stmt::Rt(RtStmt::SwitchBackdrop, vec![backdrop]));
             }
@@ -716,7 +733,8 @@ impl<'a> Lowerer<'a> {
             let arg = match want {
                 Type::Bool => self.input(block, arg_id, Type::Bool),
                 _ => match raw {
-                    Some(_) => self.input_raw(block, arg_id, Type::Str),
+                    Some(_) if want == Type::Num => self.input_raw(block, arg_id, Type::Str),
+                    Some(_) => self.input_dynamic(block, arg_id),
                     None => Expr::Str(self.program.intern("")),
                 },
             };
@@ -807,6 +825,18 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// An input stored in a dynamically typed variable or parameter. A typed value stays text, as
+    /// it is in scratch-vm, since the slot keeps it for blocks that tell text from numbers (see
+    /// [`Lowerer::input_text`]); a numeric slot gets the number, which is the same to every block
+    /// that may read it.
+    fn input_dynamic(&mut self, block: &Block, name: &str) -> Expr {
+        let raw = block.inputs.get(name).cloned().unwrap_or(serde_json::Value::Null);
+        if let Input::Primitive(Primitive::Text(s)) = parse_input(&raw) {
+            return Expr::Str(self.program.intern(&s));
+        }
+        self.input_raw(block, name, Type::Str)
+    }
+
     fn primitive(&mut self, p: &Primitive) -> Expr {
         match p {
             Primitive::Text(s) => {
@@ -816,6 +846,8 @@ impl<'a> Lowerer<'a> {
                     Expr::Str(self.program.intern(s))
                 }
             }
+            // A number in the file is a number to scratch-vm too.
+            Primitive::Number(n) => Expr::Num(*n),
             Primitive::Broadcast { name, .. } => Expr::Str(self.program.intern(name)),
             Primitive::Variable { name, id } => Expr::Var(self.resolve_variable(id, name)),
             Primitive::List { .. } => {
@@ -975,6 +1007,15 @@ impl<'a> Lowerer<'a> {
             "looks_costume" => self.menu(&block, "COSTUME"),
             "looks_backdrops" => self.menu(&block, "BACKDROP"),
             "sensing_of_object_menu" => self.menu(&block, "OBJECT"),
+            "sensing_keyoptions" => self.menu(&block, "KEY_OPTION"),
+            "sensing_mousex" => Expr::Rt(RtExpr::MouseX, Vec::new()),
+            "sensing_mousey" => Expr::Rt(RtExpr::MouseY, Vec::new()),
+            "sensing_mousedown" => Expr::Rt(RtExpr::MouseDown, Vec::new()),
+            "sensing_keypressed" => {
+                let key = self.input_text(&block, "KEY_OPTION");
+                let key = self.cast(key, Type::Any);
+                Expr::Rt(RtExpr::KeyPressed, vec![key])
+            }
             // Legacy reporters scratch-vm keeps as no-ops that report nothing.
             "motion_xscroll" | "motion_yscroll" => Expr::Num(0.0),
             op => {
@@ -993,6 +1034,33 @@ impl<'a> Lowerer<'a> {
 
     fn broadcast_input(&mut self, block: &Block) -> Expr {
         self.input(block, "BROADCAST_INPUT", Type::Str)
+    }
+
+    /// Lowers an input whose block asks whether its value is a number: `key pressed?` and the
+    /// costume and backdrop blocks treat a number and the same digits as text differently. A value
+    /// typed into the project is text to scratch-vm unless the file stores a JSON number, so it
+    /// stays as the file has it. A variable or parameter read here is never specialized to a
+    /// number, since a numeric slot could not tell the text "2" from the number 2.
+    fn input_text(&mut self, block: &Block, name: &str) -> Expr {
+        let raw = block.inputs.get(name).cloned().unwrap_or(serde_json::Value::Null);
+        if let Input::Primitive(Primitive::Text(s)) = parse_input(&raw) {
+            return Expr::Str(self.program.intern(&s));
+        }
+        let e = self.input_raw(block, name, Type::Str);
+        match e {
+            Expr::Var(var @ (VarRef::TargetNum(_) | VarRef::StageNum(_))) => self.demote_var(var),
+            Expr::Var(VarRef::Param(i)) => {
+                if let Some(pi) = self.proc {
+                    let ty = &mut self.types.procs[self.target][pi].param_types[i as usize];
+                    if *ty == Type::Num {
+                        *ty = Type::Any;
+                        self.changed = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+        e
     }
 
     /// The value of a menu block's field, as a string.
@@ -1042,7 +1110,7 @@ fn may_be_nan(e: &Expr) -> bool {
         Expr::Cast(Type::Num, _) => false,
         Expr::Unary(UnOp::ToNumber, _) => false,
         Expr::Unary(UnOp::Round | UnOp::Abs | UnOp::Floor | UnOp::Ceil, inner) => may_be_nan(inner),
-        Expr::Rt(RtExpr::Length | RtExpr::Timer, _) => false,
+        Expr::Rt(RtExpr::Length | RtExpr::Timer | RtExpr::MouseX | RtExpr::MouseY, _) => false,
         _ => true,
     }
 }
@@ -1178,6 +1246,34 @@ mod tests {
             ));
         }
         project(&format!("{{{}}}", blocks.join(",")), "{}")
+    }
+
+    #[test]
+    fn parameters_read_as_costumes_keep_their_text() {
+        // `define pick (c)` switches to costume `c`, and the flag calls it with the text "2".
+        let p = project(
+            r#"{"d":{"opcode":"procedures_definition","next":"s","parent":null,"inputs":{"custom_block":[1,"pr"]},"fields":{},"topLevel":true},
+            "pr":{"opcode":"procedures_prototype","next":null,"parent":"d","inputs":{"a1":[1,"ar"]},"fields":{},"shadow":true,"topLevel":false,
+              "mutation":{"tagName":"mutation","children":[],"proccode":"pick %s","argumentids":"[\"a1\"]","argumentnames":"[\"c\"]","argumentdefaults":"[\"\"]","warp":"false"}},
+            "ar":{"opcode":"argument_reporter_string_number","next":null,"parent":"pr","inputs":{},"fields":{"VALUE":["c",null]},"shadow":true,"topLevel":false},
+            "s":{"opcode":"looks_switchcostumeto","next":null,"parent":"d","inputs":{"COSTUME":[3,"r",[10,""]]},"fields":{},"topLevel":false},
+            "r":{"opcode":"argument_reporter_string_number","next":null,"parent":"s","inputs":{},"fields":{"VALUE":["c",null]},"topLevel":false},
+            "h":{"opcode":"event_whenflagclicked","next":"c","parent":null,"inputs":{},"fields":{},"topLevel":true},
+            "c":{"opcode":"procedures_call","next":null,"parent":"h","inputs":{"a1":[1,[10,"2"]]},"fields":{},"topLevel":false,
+              "mutation":{"tagName":"mutation","children":[],"proccode":"pick %s","argumentids":"[\"a1\"]","warp":"false"}}}"#,
+            "{}",
+        );
+        let lowered = lower(&p).unwrap();
+        let pick = lowered.program.functions.iter().find(|f| f.name.ends_with("pick %s")).unwrap();
+        assert_eq!(pick.params[0].ty, Type::Any, "{}", thatch_ir::dump(&lowered.program));
+        let call = lowered.program.functions.iter().flat_map(|f| &f.body).find_map(|s| match s {
+            Stmt::Call { args, .. } => Some(args[0].clone()),
+            _ => None,
+        });
+        assert!(
+            matches!(&call, Some(Expr::Cast(Type::Any, inner)) if matches!(**inner, Expr::Str(_))),
+            "the text \"2\" is passed as text: {call:?}"
+        );
     }
 
     #[test]

@@ -157,6 +157,137 @@ fn sprite_of(rt: *mut OpaqueRuntime, target: i64) -> Sprite {
     }
 }
 
+/// A stage with a click hat, a sprite that is clicked as the button goes down, a draggable sprite
+/// that is clicked as it comes up, and a key hat.
+const CLICKS: &str = r#"{"targets":[
+  {"isStage":true,"name":"Stage","costumes":[{"name":"backdrop1"}],"blocks":{
+    "h":{"opcode":"event_whenstageclicked","next":"s","parent":null,"inputs":{},"fields":{},"topLevel":true},
+    "s":{"opcode":"looks_say","next":null,"parent":"h","inputs":{"MESSAGE":[1,[10,"stage"]]},"fields":{},"topLevel":false},
+    "a":{"opcode":"event_whenkeypressed","next":"as","parent":null,"inputs":{},"fields":{"KEY_OPTION":["any",null]},"topLevel":true},
+    "as":{"opcode":"looks_say","next":null,"parent":"a","inputs":{"MESSAGE":[1,[10,"any"]]},"fields":{},"topLevel":false}}},
+  {"isStage":false,"name":"Cat","layerOrder":1,"costumes":[{"name":"a"}],"blocks":{
+    "h":{"opcode":"event_whenthisspriteclicked","next":"s","parent":null,"inputs":{},"fields":{},"topLevel":true},
+    "s":{"opcode":"looks_say","next":null,"parent":"h","inputs":{"MESSAGE":[1,[10,"cat"]]},"fields":{},"topLevel":false},
+    "k":{"opcode":"event_whenkeypressed","next":"ks","parent":null,"inputs":{},"fields":{"KEY_OPTION":["left arrow",null]},"topLevel":true},
+    "ks":{"opcode":"looks_say","next":null,"parent":"k","inputs":{"MESSAGE":[1,[10,"left"]]},"fields":{},"topLevel":false},
+    "r":{"opcode":"event_whenkeypressed","next":"rs","parent":null,"inputs":{},"fields":{"KEY_OPTION":["right arrow",null]},"topLevel":true},
+    "rs":{"opcode":"looks_say","next":"rf","parent":"r","inputs":{"MESSAGE":[1,[10,"right"]]},"fields":{},"topLevel":false},
+    "rf":{"opcode":"control_forever","next":null,"parent":"rs","inputs":{},"fields":{},"topLevel":false},
+    "x":{"opcode":"event_whenkeypressed","next":"xs","parent":null,"inputs":{},"fields":{"KEY_OPTION":["s",null]},"topLevel":true},
+    "xs":{"opcode":"control_stop","next":null,"parent":"x","inputs":{},"fields":{"STOP_OPTION":["other scripts in sprite",null]},"topLevel":false,
+      "mutation":{"tagName":"mutation","children":[],"hasnext":"true"}}}},
+  {"isStage":false,"name":"Dog","layerOrder":2,"draggable":true,"costumes":[{"name":"d"}],"blocks":{
+    "h":{"opcode":"event_whenthisspriteclicked","next":"s","parent":null,"inputs":{},"fields":{},"topLevel":true},
+    "s":{"opcode":"looks_say","next":null,"parent":"h","inputs":{"MESSAGE":[1,[10,"dog"]]},"fields":{},"topLevel":false}}}
+]}"#;
+
+unsafe extern "C" fn record_say(
+    data: *mut c_void,
+    _rt: *mut OpaqueRuntime,
+    _target: i64,
+    text: *const u8,
+    len: usize,
+    _think: i8,
+) {
+    // A cleared bubble, as the headless host ignores it.
+    if len == 0 {
+        return;
+    }
+    // SAFETY: `data` is the `Vec<String>` the test registered; the runtime passes `len` bytes of UTF-8.
+    unsafe {
+        let said = &mut *data.cast::<Vec<String>>();
+        said.push(String::from_utf8_lossy(std::slice::from_raw_parts(text, len)).into_owned());
+    }
+}
+
+#[test]
+fn clicks_and_keys_start_the_right_hats() {
+    let project = thatch_sb3::Project::from_json(CLICKS).expect("the project parses");
+    let lowered = thatch_scratch::lower(&project).expect("the project lowers");
+    assert!(lowered.warnings.is_empty(), "{:?}", lowered.warnings);
+    let compiled =
+        thatch_codegen::compile_jit(&lowered.program, &thatch_runtime::symbols()).expect("the project compiles");
+    // SAFETY: as above.
+    let init: InitFn = unsafe { std::mem::transmute::<*const u8, InitFn>(compiled.init_address()) };
+    let mut said: Vec<String> = Vec::new();
+    let host = Host {
+        data: ptr::addr_of_mut!(said).cast::<c_void>(),
+        say: Some(record_say),
+        now_ms: None,
+        sprite_changed: None,
+        measure: None,
+    };
+    // SAFETY: the host table outlives the runtime, and the runtime is used between frames only.
+    unsafe {
+        let rt = api::thatch_runtime_create(thatch_abi::ABI_VERSION as i32, &raw const host, 1);
+        assert_eq!(api::thatch_runtime_load(rt, compiled.abi_version() as i32, init), thatch_abi::LOAD_OK);
+        assert_eq!(api::thatch_runtime_target_draggable(rt, 1), 0);
+        assert_eq!(api::thatch_runtime_target_draggable(rt, 2), 1);
+        let frame = |rt| assert_eq!(api::thatch_runtime_frame(rt), 0);
+
+        // The Cat is clicked as the button goes down, and only once per press: a second report of
+        // the button down, after the first click ran, clicks nothing.
+        api::thatch_runtime_mouse_button(rt, 1, 1, 0);
+        frame(rt);
+        api::thatch_runtime_mouse_button(rt, 1, 1, 0);
+        frame(rt);
+        api::thatch_runtime_mouse_button(rt, 0, 1, 0);
+        frame(rt);
+        assert_eq!(said, ["cat"]);
+        // The draggable Dog is clicked as the button comes up, but not at the end of a drag.
+        api::thatch_runtime_mouse_button(rt, 1, 2, 0);
+        frame(rt);
+        assert_eq!(said, ["cat"]);
+        api::thatch_runtime_mouse_button(rt, 0, 2, 0);
+        frame(rt);
+        assert_eq!(said, ["cat", "dog"]);
+        api::thatch_runtime_mouse_button(rt, 1, 2, 0);
+        api::thatch_runtime_mouse_button(rt, 0, 2, 1);
+        frame(rt);
+        assert_eq!(said, ["cat", "dog"]);
+        // A press on the stage starts its hat; one outside the stage starts nothing.
+        api::thatch_runtime_mouse_button(rt, 1, 0, 0);
+        frame(rt);
+        api::thatch_runtime_mouse_button(rt, 0, -1, 0);
+        api::thatch_runtime_mouse_button(rt, 1, -1, 0);
+        frame(rt);
+        assert_eq!(said, ["cat", "dog", "stage"]);
+        // Keys by their browser names. A modifier is no key at all, so it starts not even the
+        // `any` hat; a real key starts its own hat and then the stage's `any` hat.
+        api::thatch_runtime_mouse_button(rt, 0, -1, 0);
+        api::thatch_runtime_key(rt, c"Shift".as_ptr(), 5, 1);
+        frame(rt);
+        assert_eq!(said, ["cat", "dog", "stage"]);
+        api::thatch_runtime_key(rt, c"ArrowLeft".as_ptr(), 9, 1);
+        frame(rt);
+        assert_eq!(said, ["cat", "dog", "stage", "left", "any"]);
+        said.clear();
+        // A key hat leaves its running script alone, but one the host stopped starts again even
+        // before a frame has let the stopped one finish.
+        api::thatch_runtime_key(rt, c"ArrowRight".as_ptr(), 10, 1);
+        frame(rt);
+        api::thatch_runtime_key(rt, c"ArrowRight".as_ptr(), 10, 1);
+        frame(rt);
+        assert_eq!(said, ["right", "any", "any"]);
+        api::thatch_runtime_stop_all(rt);
+        api::thatch_runtime_key(rt, c"ArrowRight".as_ptr(), 10, 1);
+        frame(rt);
+        assert_eq!(said, ["right", "any", "any", "right", "any"]);
+        // `stop other scripts in sprite` kills the running right-arrow script after it has stepped
+        // in this frame, so it waits for the next one to finish. Two presses before then start one
+        // new copy, not one per press.
+        said.clear();
+        api::thatch_runtime_key(rt, c"s".as_ptr(), 1, 1);
+        frame(rt);
+        api::thatch_runtime_key(rt, c"ArrowRight".as_ptr(), 10, 1);
+        api::thatch_runtime_key(rt, c"ArrowRight".as_ptr(), 10, 1);
+        frame(rt);
+        assert_eq!(said, ["any", "right", "any"]);
+        api::thatch_runtime_mouse_move(rt, 1000.0, -33.5);
+        api::thatch_runtime_destroy(rt);
+    }
+}
+
 #[test]
 fn bouncing_the_green_flag_and_stopping_from_the_host() {
     let project = thatch_sb3::Project::from_json(BOUNCE).expect("the project parses");

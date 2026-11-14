@@ -25,7 +25,7 @@ use alloc::string::String;
 use core::ffi::c_void;
 use core::fmt::Write;
 
-pub const ABI_VERSION: u32 = 4;
+pub const ABI_VERSION: u32 = 5;
 
 /// A dynamically typed Scratch value: a number, a string handle or a boolean.
 #[repr(C)]
@@ -65,6 +65,15 @@ pub struct ThreadCtx {
 /// Hat kinds for `thatch_add_script`.
 pub const HAT_FLAG: i64 = 0;
 pub const HAT_BROADCAST: i64 = 1;
+/// `when key pressed`. The argument is the key as the `when key pressed` menu names it ("space",
+/// "left arrow", "a", "0", or "any"), matched without regard to case. A key hat does not restart a
+/// thread of its script that is still running.
+pub const HAT_KEY: i64 = 2;
+/// `when this sprite clicked`, started on the clicked target only.
+pub const HAT_SPRITE_CLICKED: i64 = 3;
+/// `when stage clicked`, also started on the clicked target only (scratch-vm treats the two click
+/// hats alike, so a stage hat on a sprite fires when that sprite is clicked).
+pub const HAT_STAGE_CLICKED: i64 = 4;
 
 /// Rotation styles, for `thatch_set_sprite`, `thatch_set_rotation_style` and [`Sprite`].
 pub const ROTATE_ALL_AROUND: i64 = 0;
@@ -238,6 +247,13 @@ rt_fns! {
     COSTUME_NAME = "thatch_costume_name"(I64, I8) -> I64;
     // `property of object`: writes the value into the caller's slot.
     PROPERTY_OF = "thatch_property_of"(I64, I64, I64, I64);
+
+    // Sensing: input the host reported.
+    MOUSE_X = "thatch_mouse_x"(I64) -> F64;
+    MOUSE_Y = "thatch_mouse_y"(I64) -> F64;
+    MOUSE_DOWN = "thatch_mouse_down"(I64) -> I8;
+    // `key pressed?` with a dynamically typed key: a name, a letter or a key code.
+    KEY_PRESSED = "thatch_key_pressed"(I64, I64) -> I8;
 }
 
 /// The symbol compiled programs export for the runtime to call.
@@ -355,6 +371,24 @@ pub const HOST_API: &[CFn] = c_fns! {
     /// Starts every script with the given hat kind (a THATCH_HAT_* value) and argument, such as a
     /// broadcast name, as a broadcast block would.
     "void" "thatch_runtime_start_hats"("ThatchRuntime *" "rt", "int64_t" "hat", "const char *" "arg", "size_t" "len");
+    /// A key went down or up. `key` is the key's name as a browser's KeyboardEvent.key gives it
+    /// (" ", "a", "ArrowLeft", "Enter"; the Scratch names "space", "left arrow" and so on work
+    /// too), UTF-8 and `len` bytes long. Names longer than one character that are not a known key
+    /// are ignored, as scratch-vm ignores modifier keys. Going down starts the `when key pressed`
+    /// hats for the key and for "any".
+    "void" "thatch_runtime_key"("ThatchRuntime *" "rt", "const char *" "key", "size_t" "len", "int8_t" "down");
+    /// The mouse moved to a point in Scratch coordinates (x from -240 to 240, y from -180 to 180,
+    /// origin in the middle, y up); the runtime rounds and clamps it as scratch-vm does. A NaN
+    /// coordinate is ignored.
+    "void" "thatch_runtime_mouse_move"("ThatchRuntime *" "rt", "double" "x", "double" "y");
+    /// The mouse button went down or up over `target`, the frontmost target under the pointer as
+    /// the host sees it (the stage when no sprite is there), or -1 outside the stage. A click on a
+    /// target that is not draggable starts its click hats as the button goes down; on a draggable
+    /// one as it comes up. Nothing starts when the button state did not change, or when `dragged`
+    /// says the release ends a drag of a sprite.
+    "void" "thatch_runtime_mouse_button"("ThatchRuntime *" "rt", "int8_t" "down", "int64_t" "target", "int8_t" "dragged");
+    /// Whether the player may drag a target, which decides when its clicks count.
+    "int8_t" "thatch_runtime_target_draggable"("const ThatchRuntime *" "rt", "int64_t" "target");
     /// Runs one frame: steps the threads until they all wait for the next frame, a redraw was
     /// requested or 75 percent of a frame has passed. Returns 0, or nonzero after an error that
     /// thatch_runtime_last_error describes, after which the runtime may only be destroyed.
@@ -423,9 +457,13 @@ typedef void (*ThatchInitFn)(ThatchRuntime *rt);
 void thatch_program_init(ThatchRuntime *rt);
 int32_t thatch_program_abi_version(void);
 
-/* Hat kinds for thatch_runtime_start_hats. */
+/* Hat kinds for thatch_runtime_start_hats. Keys and clicks have their own functions below, which
+ * follow scratch-vm's rules for them; the kinds are listed for completeness. */
 #define THATCH_HAT_FLAG {HAT_FLAG}
 #define THATCH_HAT_BROADCAST {HAT_BROADCAST}
+#define THATCH_HAT_KEY {HAT_KEY}
+#define THATCH_HAT_SPRITE_CLICKED {HAT_SPRITE_CLICKED}
+#define THATCH_HAT_STAGE_CLICKED {HAT_STAGE_CLICKED}
 
 /* Results of thatch_runtime_load. */
 #define THATCH_LOAD_OK {LOAD_OK}

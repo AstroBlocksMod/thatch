@@ -1,0 +1,26 @@
+# What the player does, before the frame on each line. Several frames between events keep the
+# order of what the sprites say the same on scratch-vm's real clock and Thatch's virtual one, and
+# nothing happens near frames 45 and 100, where the a hat's one-second wait ends.
+5 key down space
+10 key up space
+15 key down a
+20 key up a
+# The a hat is still waiting here, so this press starts nothing (key hats do not restart); the
+# any hat runs again.
+25 key down a
+30 key up a
+35 key down ArrowLeft
+40 key up left arrow
+55 mouse 100 -50
+60 mouse down
+65 mouse up Cat
+# The a hat finished a second after frame 15, so this press starts it again.
+70 key down a
+75 key up a
+85 mouse 33.4 -33.6
+88 mouse down
+112 mouse up
+# Shift is a modifier, which Scratch ignores.
+115 key down Shift
+# q stops everything.
+130 key down q
