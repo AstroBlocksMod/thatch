@@ -880,7 +880,7 @@ pub unsafe extern "C" fn thatch_move_steps(ctx: *mut ThreadCtx, steps: f64) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).move_steps(target, steps);
+        rt(ctx).move_steps(target, steps);
     }
 }
 
@@ -889,7 +889,7 @@ pub unsafe extern "C" fn thatch_go_to_xy(ctx: *mut ThreadCtx, x: f64, y: f64) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).set_xy(target, x, y);
+        rt(ctx).set_xy(target, x, y);
     }
 }
 
@@ -899,7 +899,7 @@ pub unsafe extern "C" fn thatch_go_to(ctx: *mut ThreadCtx, name: Handle) {
     unsafe {
         let target = target_of(ctx);
         let name = str_arg(name).to_owned();
-        runtime(ctx).go_to(target, &name);
+        rt(ctx).go_to(target, &name);
     }
 }
 
@@ -908,7 +908,7 @@ pub unsafe extern "C" fn thatch_set_x(ctx: *mut ThreadCtx, x: f64) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).set_x(target, x);
+        rt(ctx).set_x(target, x);
     }
 }
 
@@ -917,7 +917,7 @@ pub unsafe extern "C" fn thatch_set_y(ctx: *mut ThreadCtx, y: f64) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).set_y(target, y);
+        rt(ctx).set_y(target, y);
     }
 }
 
@@ -926,7 +926,7 @@ pub unsafe extern "C" fn thatch_change_x(ctx: *mut ThreadCtx, dx: f64) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).change_x(target, dx);
+        rt(ctx).change_x(target, dx);
     }
 }
 
@@ -935,7 +935,7 @@ pub unsafe extern "C" fn thatch_change_y(ctx: *mut ThreadCtx, dy: f64) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).change_y(target, dy);
+        rt(ctx).change_y(target, dy);
     }
 }
 
@@ -945,7 +945,7 @@ pub unsafe extern "C" fn thatch_turn(ctx: *mut ThreadCtx, degrees: f64) {
     unsafe {
         let target = target_of(ctx);
         let direction = runtime(ctx).targets[target].direction + degrees;
-        runtime(ctx).set_direction(target, direction);
+        rt(ctx).set_direction(target, direction);
     }
 }
 
@@ -954,7 +954,7 @@ pub unsafe extern "C" fn thatch_point_in_direction(ctx: *mut ThreadCtx, directio
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).set_direction(target, direction);
+        rt(ctx).set_direction(target, direction);
     }
 }
 
@@ -964,7 +964,7 @@ pub unsafe extern "C" fn thatch_point_towards(ctx: *mut ThreadCtx, name: Handle)
     unsafe {
         let target = target_of(ctx);
         let name = str_arg(name).to_owned();
-        runtime(ctx).point_towards(target, &name);
+        rt(ctx).point_towards(target, &name);
     }
 }
 
@@ -976,7 +976,7 @@ unsafe fn glide(ctx: *mut ThreadCtx, secs: f64, end_x: f64, end_y: f64) {
         let target = target_of(ctx);
         let duration_ms = secs * 1000.0;
         if secs <= 0.0 {
-            runtime(ctx).set_xy(target, end_x, end_y);
+            rt(ctx).set_xy(target, end_x, end_y);
             return;
         }
         let (start_x, start_y) = (runtime(ctx).targets[target].x, runtime(ctx).targets[target].y);
@@ -991,9 +991,9 @@ unsafe fn glide(ctx: *mut ThreadCtx, secs: f64, end_x: f64, end_y: f64) {
                 let frac = elapsed / duration_ms;
                 let x = start_x + frac * (end_x - start_x);
                 let y = start_y + frac * (end_y - start_y);
-                runtime(ctx).set_xy(target, x, y);
+                rt(ctx).set_xy(target, x, y);
             } else {
-                runtime(ctx).set_xy(target, end_x, end_y);
+                rt(ctx).set_xy(target, end_x, end_y);
                 return;
             }
         }
@@ -1022,7 +1022,7 @@ pub unsafe extern "C" fn thatch_bounce(ctx: *mut ThreadCtx) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).bounce(target);
+        rt(ctx).bounce(target);
     }
 }
 
@@ -1031,7 +1031,7 @@ pub unsafe extern "C" fn thatch_set_rotation_style(ctx: *mut ThreadCtx, style: i
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).set_rotation_style(target, style);
+        rt(ctx).set_rotation_style(target, style);
     }
 }
 
@@ -1060,7 +1060,7 @@ pub unsafe extern "C" fn thatch_set_visible(ctx: *mut ThreadCtx, visible: i8) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).set_visible(target, visible != 0);
+        rt(ctx).set_visible(target, visible != 0);
     }
 }
 
@@ -1069,7 +1069,7 @@ pub unsafe extern "C" fn thatch_switch_costume(ctx: *mut ThreadCtx, costume: *co
     // SAFETY: as `thatch_any_to_num`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).switch_costume(target, value_arg(costume), false, false);
+        rt(ctx).switch_costume(target, value_arg(costume), false, false);
     }
 }
 
@@ -1079,7 +1079,7 @@ pub unsafe extern "C" fn thatch_next_costume(ctx: *mut ThreadCtx) {
     unsafe {
         let target = target_of(ctx);
         let next = runtime(ctx).targets[target].costume as f64 + 1.0;
-        runtime(ctx).switch_costume(target, ValueRef::Num(next), false, true);
+        rt(ctx).switch_costume(target, ValueRef::Num(next), false, true);
     }
 }
 
@@ -1088,7 +1088,7 @@ pub unsafe extern "C" fn thatch_switch_backdrop(ctx: *mut ThreadCtx, backdrop: *
     // SAFETY: as `thatch_any_to_num`.
     unsafe {
         let stage = runtime(ctx).stage_index();
-        runtime(ctx).switch_costume(stage, value_arg(backdrop), true, false);
+        rt(ctx).switch_costume(stage, value_arg(backdrop), true, false);
     }
 }
 
@@ -1098,7 +1098,7 @@ pub unsafe extern "C" fn thatch_next_backdrop(ctx: *mut ThreadCtx) {
     unsafe {
         let stage = runtime(ctx).stage_index();
         let next = runtime(ctx).targets[stage].costume as f64 + 1.0;
-        runtime(ctx).switch_costume(stage, ValueRef::Num(next), true, true);
+        rt(ctx).switch_costume(stage, ValueRef::Num(next), true, true);
     }
 }
 
@@ -1107,7 +1107,7 @@ pub unsafe extern "C" fn thatch_set_size(ctx: *mut ThreadCtx, size: f64) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).set_size(target, size);
+        rt(ctx).set_size(target, size);
     }
 }
 
@@ -1117,7 +1117,7 @@ pub unsafe extern "C" fn thatch_change_size(ctx: *mut ThreadCtx, change: f64) {
     unsafe {
         let target = target_of(ctx);
         let size = runtime(ctx).targets[target].size + change;
-        runtime(ctx).set_size(target, size);
+        rt(ctx).set_size(target, size);
     }
 }
 
@@ -1126,7 +1126,7 @@ pub unsafe extern "C" fn thatch_set_effect(ctx: *mut ThreadCtx, effect: i64, val
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).set_effect(target, usize::try_from(effect).unwrap_or(usize::MAX), value);
+        rt(ctx).set_effect(target, usize::try_from(effect).unwrap_or(usize::MAX), value);
     }
 }
 
@@ -1135,7 +1135,7 @@ pub unsafe extern "C" fn thatch_change_effect(ctx: *mut ThreadCtx, effect: i64, 
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).change_effect(target, usize::try_from(effect).unwrap_or(usize::MAX), change);
+        rt(ctx).change_effect(target, usize::try_from(effect).unwrap_or(usize::MAX), change);
     }
 }
 
@@ -1144,7 +1144,7 @@ pub unsafe extern "C" fn thatch_clear_effects(ctx: *mut ThreadCtx) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).clear_effects(target);
+        rt(ctx).clear_effects(target);
     }
 }
 
@@ -1153,7 +1153,7 @@ pub unsafe extern "C" fn thatch_go_to_layer(ctx: *mut ThreadCtx, front: i8) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).go_to_layer(target, front != 0);
+        rt(ctx).go_to_layer(target, front != 0);
     }
 }
 
@@ -1162,7 +1162,7 @@ pub unsafe extern "C" fn thatch_go_layers(ctx: *mut ThreadCtx, layers: f64) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let target = target_of(ctx);
-        runtime(ctx).move_layer(target, layers);
+        rt(ctx).move_layer(target, layers);
     }
 }
 

@@ -123,12 +123,98 @@ fn a_host_that_draws_gets_fenced_and_clamped_sprites() {
     assert_eq!(cat.visible, 0);
     assert_eq!(order, [0, 2, 1], "the Cat moved in front of the Dog");
     assert!(redraw, "moving a visible sprite asks for a redraw when the host draws");
-    assert!(recorder.changes.iter().all(|t| *t == 1));
+    // The green flag clears every target's effects first, as scratch-vm's stopAll does.
+    assert_eq!(recorder.changes[..3], [0, 1, 2]);
+    assert!(recorder.changes[3..].iter().all(|t| *t == 1), "{:?}", recorder.changes);
     assert_eq!(
-        recorder.changes.len(),
+        recorder.changes.len() - 3,
         8,
         "one callback per change: move, two sizes, turn, layer, effect, costume, hide"
     );
+}
+
+/// The Cat bounces off the right edge and says something; the Dog moves for as long as a
+/// broadcast keeps it going.
+const BOUNCE: &str = r#"{"targets":[
+  {"isStage":true,"name":"Stage","costumes":[{"name":"backdrop1"}]},
+  {"isStage":false,"name":"Cat","layerOrder":1,"costumes":[{"name":"a"}],"blocks":{
+    "h":{"opcode":"event_whenflagclicked","next":"g","parent":null,"inputs":{},"fields":{},"topLevel":true},
+    "g":{"opcode":"motion_gotoxy","next":"b","parent":"h","inputs":{"X":[1,[4,"300"]],"Y":[1,[4,"0"]]},"fields":{},"topLevel":false},
+    "b":{"opcode":"motion_ifonedgebounce","next":"s","parent":"g","inputs":{},"fields":{},"topLevel":false},
+    "s":{"opcode":"looks_say","next":null,"parent":"b","inputs":{"MESSAGE":[1,[10,"hi"]]},"fields":{},"topLevel":false}}},
+  {"isStage":false,"name":"Dog","layerOrder":2,"costumes":[{"name":"d"}],"blocks":{
+    "r":{"opcode":"event_whenbroadcastreceived","next":"f","parent":null,"inputs":{},"fields":{"BROADCAST_OPTION":["go","b1"]},"topLevel":true},
+    "f":{"opcode":"control_forever","next":null,"parent":"r","inputs":{"SUBSTACK":[2,"c"]},"fields":{},"topLevel":false},
+    "c":{"opcode":"motion_changeyby","next":null,"parent":"f","inputs":{"DY":[1,[4,"1"]]},"fields":{},"topLevel":false}}}
+]}"#;
+
+fn sprite_of(rt: *mut OpaqueRuntime, target: i64) -> Sprite {
+    // SAFETY: the tests pass a live runtime between frames.
+    unsafe {
+        let mut sprite = Sprite { ..std::mem::zeroed() };
+        assert_eq!(api::thatch_runtime_sprite(rt, target, &raw mut sprite), 1);
+        sprite
+    }
+}
+
+#[test]
+fn bouncing_the_green_flag_and_stopping_from_the_host() {
+    let project = thatch_sb3::Project::from_json(BOUNCE).expect("the project parses");
+    let lowered = thatch_scratch::lower(&project).expect("the project lowers");
+    assert!(lowered.warnings.is_empty(), "{:?}", lowered.warnings);
+    let compiled =
+        thatch_codegen::compile_jit(&lowered.program, &thatch_runtime::symbols()).expect("the project compiles");
+    // SAFETY: as above.
+    let init: InitFn = unsafe { std::mem::transmute::<*const u8, InitFn>(compiled.init_address()) };
+    let mut recorder = Recorder { changes: Vec::new() };
+    let host = Host {
+        data: ptr::addr_of_mut!(recorder).cast::<c_void>(),
+        say: None,
+        now_ms: None,
+        sprite_changed: Some(sprite_changed),
+        measure: Some(measure),
+    };
+    // SAFETY: the host table outlives the runtime, and the runtime is used between frames only.
+    unsafe {
+        let rt = api::thatch_runtime_create(thatch_abi::ABI_VERSION as i32, &raw const host, 1);
+        assert_eq!(api::thatch_runtime_load(rt, compiled.abi_version() as i32, init), thatch_abi::LOAD_OK);
+        let frame = |rt| assert_eq!(api::thatch_runtime_frame(rt), 0);
+        let go = "go";
+        api::thatch_runtime_start_hats(rt, thatch_abi::HAT_BROADCAST, go.as_ptr().cast(), go.len());
+        frame(rt);
+        assert!(sprite_of(rt, 2).y >= 1.0);
+        assert_eq!(api::thatch_runtime_has_threads(rt), 1);
+
+        // The green flag stops the Dog's loop before it starts the Cat.
+        api::thatch_runtime_green_flag(rt);
+        let dog_y = sprite_of(rt, 2).y;
+        frame(rt);
+        assert_eq!(sprite_of(rt, 2).y, dog_y, "the Dog stopped");
+        assert_eq!(api::thatch_runtime_has_threads(rt), 0);
+        // Fenced at 275, then bounced off the right edge: turned around and pushed back onto the
+        // stage, as scratch-vm's ifOnEdgeBounce does with a renderer.
+        let cat = sprite_of(rt, 1);
+        assert_eq!((cat.x, cat.y, cat.direction), (190.0, 0.0, -90.0));
+
+        // A frame in which nothing happens asks for no drawing; a stop from the host between
+        // frames, which clears the Cat's bubble and everyone's effects, is drawn after the next.
+        frame(rt);
+        assert_eq!(api::thatch_runtime_redraw_requested(rt), 0);
+        api::thatch_runtime_stop_all(rt);
+        assert_eq!(api::thatch_runtime_redraw_requested(rt), 1);
+        frame(rt);
+        assert_eq!(api::thatch_runtime_redraw_requested(rt), 1);
+        frame(rt);
+        assert_eq!(api::thatch_runtime_redraw_requested(rt), 0);
+
+        // Stopped threads stop counting at once.
+        api::thatch_runtime_start_hats(rt, thatch_abi::HAT_BROADCAST, go.as_ptr().cast(), go.len());
+        frame(rt);
+        assert_eq!(api::thatch_runtime_has_threads(rt), 1);
+        api::thatch_runtime_stop_all(rt);
+        assert_eq!(api::thatch_runtime_has_threads(rt), 0);
+        api::thatch_runtime_destroy(rt);
+    }
 }
 
 #[test]

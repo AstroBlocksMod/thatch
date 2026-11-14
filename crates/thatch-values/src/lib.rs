@@ -429,13 +429,13 @@ pub fn clamp(n: f64, min: f64, max: f64) -> f64 {
     js_min(js_max(n, min), max)
 }
 
-/// `Math.max` of two numbers: NaN wins.
-fn js_max(a: f64, b: f64) -> f64 {
+/// `Math.max` of two numbers: NaN wins, unlike `f64::max`.
+pub fn js_max(a: f64, b: f64) -> f64 {
     if a.is_nan() || b.is_nan() { f64::NAN } else { a.max(b) }
 }
 
-/// `Math.min` of two numbers: NaN wins.
-fn js_min(a: f64, b: f64) -> f64 {
+/// `Math.min` of two numbers: NaN wins, unlike `f64::min`.
+pub fn js_min(a: f64, b: f64) -> f64 {
     if a.is_nan() || b.is_nan() { f64::NAN } else { a.min(b) }
 }
 

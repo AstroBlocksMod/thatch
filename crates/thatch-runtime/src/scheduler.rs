@@ -506,10 +506,12 @@ impl Runtime {
     /// As [`Runtime::frame`].
     pub unsafe fn shutdown(rt: *mut Runtime) {
         // SAFETY: forwarded from the caller; no thread runs here.
+        // The host is going away, so it hears nothing more: no bubbles or effects are cleared.
         let threads = unsafe {
-            let handle = Rt::new(rt);
-            handle.stop_all();
-            handle.with(|r| std::mem::take(&mut r.threads))
+            Rt::new(rt).with(|r| {
+                r.kill_all();
+                std::mem::take(&mut r.threads)
+            })
         };
         for mut t in threads {
             t.finish();
@@ -526,11 +528,6 @@ impl Runtime {
 
     pub fn bubble_token(&self, target: usize) -> u64 {
         self.targets[target].bubble_token
-    }
-
-    /// The runtime as the host sees it, for callbacks.
-    pub(crate) fn opaque(&self) -> *mut OpaqueRuntime {
-        self.this.cast::<OpaqueRuntime>()
     }
 }
 
@@ -557,6 +554,11 @@ impl Rt {
         // SAFETY: `new` promised a live runtime that nothing else borrows, and `f` reaches it only
         // through this borrow.
         unsafe { f(&mut *self.0) }
+    }
+
+    /// The runtime as the host sees it, for callbacks.
+    pub(crate) fn opaque(self) -> *mut OpaqueRuntime {
+        self.0.cast::<OpaqueRuntime>()
     }
 
     /// `say` and `think`. Returns the bubble token, which `say for secs` uses to clear only its own
@@ -612,10 +614,15 @@ impl Rt {
         self.with(|r| r.timer_start_ms = now);
     }
 
-    /// Stops every thread, as the stop sign or a `stop all` block does, and clears every bubble.
+    /// Stops every thread, as the stop sign or a `stop all` block does, clears every bubble, and
+    /// clears every target's graphic effects, as scratch-vm's `stopAll` does through each target's
+    /// `onStopAll`.
     pub fn stop_all(self) {
         for target in self.with(Runtime::kill_all) {
             self.say(target, String::new(), false);
+        }
+        for target in 0..self.with(|r| r.targets.len()) {
+            self.clear_effects(target);
         }
     }
 

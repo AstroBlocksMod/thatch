@@ -46,7 +46,7 @@ The runtime keeps every sprite's position and direction and tells the host when 
 - change effect by, set effect to, clear graphic effects
 - go to front or back layer, go forward or backward (layers)
 
-Costumes are matched as scratch-vm matches them: a number is a costume number, a string a costume name first, then "next costume", "previous costume" (or "next backdrop", "previous backdrop" and "random backdrop" on the backdrop blocks), then a number written as text. Layer changes also change the order in which hats start, as in scratch-vm, since both follow the drawing order.
+Costumes are matched as scratch-vm matches them: a number is a costume number, a string a costume name first, then "next costume", "previous costume" (or "next backdrop", "previous backdrop" and "random backdrop" on the backdrop blocks), then a number written as text. A boolean that names no costume counts as a number too, as JavaScript's `Number` reads it, so `true` picks the first costume and `false` the last, as in scratch-vm. Layer changes also change the order in which hats start, as in scratch-vm, since both follow the drawing order; a sprite never moves behind the stage. Graphic effects are cleared by `stop all`, the stop sign and the green flag, as scratch-vm clears them.
 
 Bubbles show up in the headless host's output; a host that draws receives them through its `say` callback.
 

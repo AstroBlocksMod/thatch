@@ -297,7 +297,8 @@ pub type HostMeasureFn =
 /// for a redraw, which ends the frame early, as scratch-vm does with a renderer. `measure` lets the
 /// runtime keep sprites fenced to the stage, bounce them off its edges and clamp their size, which
 /// all need to know how big a sprite is drawn; without it those do what scratch-vm does without a
-/// renderer, which is nothing.
+/// renderer, which is nothing. Callbacks may read the runtime back through the host API, but not
+/// change it.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Host {
@@ -494,7 +495,8 @@ typedef int8_t (*ThatchMeasureFn)(void *data, ThatchRuntime *rt, int64_t target,
  * sprite_changed tells the runtime that the host draws: a visible change to a sprite then asks for a
  * redraw, which ends the frame early, as scratch-vm does with a renderer. measure lets the runtime
  * keep sprites on the stage, bounce them off its edges and clamp their size, which all need to know
- * how big a sprite is drawn; without it those do what scratch-vm does without a renderer: nothing. */
+ * how big a sprite is drawn; without it those do what scratch-vm does without a renderer: nothing.
+ * Callbacks may read the runtime back through the functions below, but not change it. */
 typedef struct ThatchHost {{
     void *data;
     ThatchSayFn say;
