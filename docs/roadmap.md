@@ -24,12 +24,12 @@ The headless host stays as the reference the samples check against, since Scratc
 - [x] A host table in the ABI and a C header for hosts: a host creates the runtime with its callbacks (`say`, the clock), loads the program and steps frames; the headless host is its first implementation
 - [x] Sprite state in the runtime (position, direction, size, costume, visibility, effects, layer) and the motion and looks blocks lowered against it, testable headless through the sensing reporters, with a callback that tells the host what to draw
 - [x] Input in the host table: keys, mouse, clicks, and the hats they start
-- [ ] Stage size and frame rate as values the runtime reports to hosts instead of constants in the ABI, before any host hard-codes 480 by 360 at 30 frames per second
+- [ ] Stage size and frame rate as values the runtime reports to hosts instead of constants in the ABI, before any host hard-codes 480 by 360 at 30 frames per second. The runtime uses the same values itself, for mouse clamping, random positions, fencing and the virtual clock, so a host and the runtime never disagree about the stage
 - [ ] The Scratch Everywhere! host in its own repository: submodule, hook patch and adapter, built with their JIT and DECtalk off (the JIT starts background threads, and DECtalk's license is unclear); Linux first, then macOS and Windows
 - [ ] `thatch build --host scratch-everywhere`: links the game against the shared library and writes the license notices next to it
 - [ ] Variables synced to Scratch Everywhere!'s copies so its monitors show them
 - [ ] Pen
-- [ ] The sensing blocks that need a stage: touching, touching color, distance to, ask, and dragging sprites
+- [ ] The sensing blocks that need a stage: touching, touching color, distance to, ask, and dragging sprites (the host can already say that a release ended a drag; moving the sprite while it is dragged is what is missing)
 - [ ] Sound
 - [ ] A headed host of our own, in Rust on wgpu with no copyleft, that draws sprites and pen and is the reference for screenshot tests. It batches a frame's pen lines and stamps into a few draw calls, in order, which is where 3D projects that fill triangles with the pen spend their time. wgpu is MIT or Apache-2.0, so whether games built with it ship those notices is decided before it does
 
@@ -38,7 +38,7 @@ The headless host stays as the reference the samples check against, since Scratc
 - [ ] Lists, including the list blocks and list reporters in `join`
 - [ ] Clones: `create clone of`, `when I start as a clone`, `delete this clone`
 - [ ] Scratch's limits by default: at most 300 clones and 200,000 list items, as in scratch-vm
-- [ ] Raised limits on request: clone count, list size, stage size, frame rate, fencing and turbo mode, through `thatch` flags and through a project's TurboWarp settings comment (the JSON stage comment that ends in `// _twconfig_`). Thatch says which settings it applied, and a flag ignores the comment. Settings TurboWarp has no field for go in a `// _thatchconfig_` comment of the same shape
+- [ ] Raised limits on request: clone count, list size, stage size, frame rate, fencing and turbo mode, through `thatch` flags and through a project's TurboWarp settings comment (the JSON stage comment that ends in `// _twconfig_`). Thatch says which settings it applied, and a flag ignores the comment. Settings TurboWarp has no field for go in a `// _thatchconfig_` comment of the same shape. A comment comes with the project, so whoever runs it sets a ceiling: the settings a comment may raise, and how far, are capped by `thatch` flags and by the host, with defaults that keep a project from asking for more memory or frames than a normal game uses
 - [ ] The remaining hats: backdrop switches, timer and loudness hats
 - [ ] `answer`, `username`, `days since 2000`, `current` date and time
 - [ ] A conformance suite: run the Scratch Foundation's and TurboWarp's test projects through the scratch-vm oracle and compare
