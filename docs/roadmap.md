@@ -31,7 +31,7 @@ The headless host stays as the reference the samples check against, since Scratc
 - [ ] Pen
 - [ ] The sensing blocks that need a stage: touching, touching color, distance to, ask, and dragging sprites (the host can already say that a release ended a drag; moving the sprite while it is dragged is what is missing)
 - [ ] Sound
-- [ ] A headed host of our own, in Rust on wgpu with no copyleft, that draws sprites and pen and is the reference for screenshot tests. It batches a frame's pen lines and stamps into a few draw calls, in order, which is where 3D projects that fill triangles with the pen spend their time. wgpu is MIT or Apache-2.0, so whether games built with it ship those notices is decided before it does
+- [ ] A headed host of our own, in Rust on wgpu with no copyleft, that draws sprites and pen and is the reference for screenshot tests. It batches a frame's pen lines and stamps into a few draw calls, in order, which is where 3D projects that fill triangles with the pen spend their time. wgpu is MIT or Apache-2.0, so games built with it add its notices, and those of its dependencies, to the ones the runtime already needs
 
 ## Then: close the compatibility gaps
 
