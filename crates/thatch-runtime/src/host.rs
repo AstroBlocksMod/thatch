@@ -59,6 +59,9 @@ pub struct InputEvent {
 ///
 /// `mouse down` and `mouse up` take the name of the target under the pointer; without one it is
 /// the stage, which is also what scratch-vm picks when it has no renderer.
+///
+/// Words are separated by any whitespace. A key or target name is the rest of the line, so it may
+/// contain spaces (`left arrow`, `Sprite 1`).
 pub fn parse_input_script(text: &str) -> Result<Vec<InputEvent>, String> {
     let mut events = Vec::new();
     for (number, line) in text.lines().enumerate() {
@@ -67,44 +70,52 @@ pub fn parse_input_script(text: &str) -> Result<Vec<InputEvent>, String> {
             continue;
         }
         let bad = |what: &str| format!("input line {}: {what}: {line:?}", number + 1);
-        let mut words = line.splitn(3, ' ');
-        let frame: u64 = words.next().and_then(|w| w.parse().ok()).ok_or_else(|| bad("expected a frame number"))?;
-        let kind = words.next().ok_or_else(|| bad("expected key or mouse after the frame"))?;
-        let rest = words.next().unwrap_or("").trim();
+        let (frame, rest) = first_word(line);
+        let frame: u64 = frame.parse().map_err(|_| bad("expected a frame number"))?;
+        let (kind, rest) = first_word(rest);
         let input = match kind {
             "key" => {
-                let (state, key) =
-                    rest.split_once(' ').ok_or_else(|| bad("expected `key down NAME` or `key up NAME`"))?;
+                let (state, key) = first_word(rest);
                 let down = match state {
                     "down" => true,
                     "up" => false,
-                    _ => return Err(bad("expected down or up")),
+                    _ => return Err(bad("expected `key down NAME` or `key up NAME`")),
                 };
-                Input::Key { key: key.trim().to_owned(), down }
-            }
-            "mouse" => {
-                let mut parts = rest.splitn(2, ' ');
-                match parts.next().unwrap_or("") {
-                    state @ ("down" | "up") => {
-                        let target = parts.next().map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned);
-                        Input::MouseButton { down: state == "down", target }
-                    }
-                    x => {
-                        let x: f64 = x.parse().map_err(|_| bad("expected `mouse X Y`, `mouse down` or `mouse up`"))?;
-                        let y: f64 = parts
-                            .next()
-                            .and_then(|y| y.trim().parse().ok())
-                            .ok_or_else(|| bad("expected `mouse X Y`"))?;
-                        Input::MouseMove { x, y }
-                    }
+                if key.is_empty() {
+                    return Err(bad("expected `key down NAME` or `key up NAME`"));
                 }
+                Input::Key { key: key.to_owned(), down }
             }
+            "mouse" => match first_word(rest) {
+                (state @ ("down" | "up"), target) => {
+                    let target = (!target.is_empty()).then(|| target.to_owned());
+                    Input::MouseButton { down: state == "down", target }
+                }
+                (x, rest) => {
+                    let x: f64 = x.parse().map_err(|_| bad("expected `mouse X Y`, `mouse down` or `mouse up`"))?;
+                    let (y, rest) = first_word(rest);
+                    let y: f64 = y.parse().map_err(|_| bad("expected `mouse X Y`"))?;
+                    if !rest.is_empty() {
+                        return Err(bad("expected `mouse X Y`"));
+                    }
+                    Input::MouseMove { x, y }
+                }
+            },
             _ => return Err(bad("expected key or mouse after the frame")),
         };
         events.push(InputEvent { frame, input });
     }
     events.sort_by_key(|e| e.frame);
     Ok(events)
+}
+
+/// The first whitespace-separated word of `s` and the rest after the whitespace that follows it.
+fn first_word(s: &str) -> (&str, &str) {
+    let s = s.trim_start();
+    match s.find(char::is_whitespace) {
+        Some(i) => (&s[..i], s[i..].trim()),
+        None => (s, ""),
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -203,6 +214,14 @@ unsafe fn run_program(
             thatch_abi::LOAD_NO_STAGE => return Err("the program registered no stage".to_owned()),
             other => return Err(format!("loading the program failed with code {other}")),
         }
+        // A target the project lacks is a mistake in the script, not a click outside the stage.
+        for event in &options.input {
+            if let Input::MouseButton { target: Some(name), .. } = &event.input
+                && target_index(rt, Some(name)).is_none()
+            {
+                return Err(format!("the input script clicks {name:?}, which the project has no target named"));
+            }
+        }
         let started = Instant::now();
         api::thatch_runtime_green_flag(rt);
         let mut next_input = 0;
@@ -248,18 +267,31 @@ unsafe fn feed(rt: *mut OpaqueRuntime, input: &Input) {
             }
             Input::MouseMove { x, y } => api::thatch_runtime_mouse_move(rt, *x, *y),
             Input::MouseButton { down, target } => {
-                let count = api::thatch_runtime_target_count(rt);
-                let index = (0..count).find(|i| match target {
-                    Some(name) => {
-                        let mut len = 0;
-                        let p = api::thatch_runtime_target_name(rt, *i, &raw mut len);
-                        !p.is_null() && std::slice::from_raw_parts(p.cast::<u8>(), len) == name.as_bytes()
-                    }
-                    None => api::thatch_runtime_target_is_stage(rt, *i) != 0,
-                });
-                api::thatch_runtime_mouse_button(rt, i8::from(*down), index.unwrap_or(-1));
+                let index = target_index(rt, target.as_deref()).unwrap_or(-1);
+                // A headless run drags nothing.
+                api::thatch_runtime_mouse_button(rt, i8::from(*down), index, 0);
             }
         }
+    }
+}
+
+/// The target with this name, or the stage for None. Scratch keeps sprite names unique, and the
+/// stage's name is never a sprite's.
+///
+/// # Safety
+/// As [`feed`].
+unsafe fn target_index(rt: *mut OpaqueRuntime, target: Option<&str>) -> Option<i64> {
+    // SAFETY: forwarded from the caller.
+    unsafe {
+        let count = api::thatch_runtime_target_count(rt);
+        (0..count).find(|i| match target {
+            Some(name) => {
+                let mut len = 0;
+                let p = api::thatch_runtime_target_name(rt, *i, &raw mut len);
+                !p.is_null() && std::slice::from_raw_parts(p.cast::<u8>(), len) == name.as_bytes()
+            }
+            None => api::thatch_runtime_target_is_stage(rt, *i) != 0,
+        })
     }
 }
 
@@ -343,5 +375,20 @@ mod tests {
         assert!(parse_input_script("1 key sideways a").is_err());
         assert!(parse_input_script("1 mouse 3").is_err());
         assert!(parse_input_script("1 touch 3 4").is_err());
+        assert!(parse_input_script("1 key down").is_err());
+        assert!(parse_input_script("1 mouse 3 4 5").is_err());
+    }
+
+    #[test]
+    fn input_scripts_take_any_whitespace() {
+        let events = parse_input_script("5  key\tdown  space\n20\tmouse 10  20\n25 mouse up  Sprite 1 \n").unwrap();
+        assert_eq!(
+            events,
+            [
+                InputEvent { frame: 5, input: Input::Key { key: "space".into(), down: true } },
+                InputEvent { frame: 20, input: Input::MouseMove { x: 10.0, y: 20.0 } },
+                InputEvent { frame: 25, input: Input::MouseButton { down: false, target: Some("Sprite 1".into()) } },
+            ]
+        );
     }
 }

@@ -1,0 +1,48 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = "dog 1"
+str 1 = "dog 2"
+str 2 = "0.5"
+str 3 = "dog 3"
+str 4 = "dog 4"
+str 5 = "fast starts"
+str 6 = "fast after wait 0"
+str 7 = "nobody"
+str 8 = "fast after broadcast"
+str 9 = "slow starts"
+str 10 = "slow after wait 0"
+target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["backdrop1"]
+target "Dog"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["c"]
+  script FlagClicked -> fn 2
+target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["c"]
+  script FlagClicked -> fn 3
+fn 0 "Cat/fast"() warp
+  Say((any)str 5)
+  Wait(0)
+  Say((any)str 6)
+  BroadcastAndWait(str 7)
+  Say((any)str 8)
+fn 1 "Cat/slow"()
+  Say((any)str 9)
+  Wait(0)
+  Say((any)str 10)
+fn 2 "Dog/flag w17"()
+  Say((any)str 0)
+  Wait(0)
+  Say((any)str 1)
+  Wait(0.5)
+  Say((any)str 3)
+  Wait(0)
+  Say((any)str 4)
+fn 3 "Cat/flag w13"()
+  call fn 0() nesting 0
+  Wait(0.5)
+  call fn 1() nesting 0

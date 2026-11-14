@@ -43,6 +43,7 @@ const WORK_TIME: Duration = Duration::from_micros(25_000);
 
 pub struct Script {
     pub hat: i64,
+    /// The hat's argument (a broadcast or key name) in upper case, as `startHats` compares it.
     pub arg: String,
     pub func: ScriptFn,
 }
@@ -98,6 +99,10 @@ pub struct Runtime {
     dying: Vec<Thread>,
     /// The index of the thread being stepped, while one is.
     stepping: Option<usize>,
+    /// After a `stop all` in the current pass, the length the thread list had then: scratch-vm
+    /// steps the rest of that old list, but not the threads started after the stop, which are in
+    /// its new list.
+    pass_end: Option<usize>,
     next_thread_id: u64,
     /// Whether a block asked for a redraw in this frame, which ends the frame after the current
     /// pass as in scratch-vm. Cleared when a frame starts.
@@ -135,6 +140,7 @@ impl Runtime {
             threads: Vec::new(),
             dying: Vec::new(),
             stepping: None,
+            pass_end: None,
             next_thread_id: 1,
             redraw_requested: false,
             draw_requested: false,
@@ -253,7 +259,7 @@ impl Runtime {
     }
 
     pub fn add_script(&mut self, target: usize, hat: i64, arg: String, func: ScriptFn) {
-        self.targets[target].scripts.push(Script { hat, arg, func });
+        self.targets[target].scripts.push(Script { hat, arg: arg.to_uppercase(), func });
     }
 
     pub(crate) fn stage_index(&self) -> usize {
@@ -340,7 +346,7 @@ impl Runtime {
     /// to back with the stage last, scripts in file order. A thread of the same script and target
     /// that is still in the thread list, even one that finished during this pass, is replaced in
     /// place by the new one, except for key hats, which leave a running thread alone and start
-    /// nothing. Returns the ids of the threads started.
+    /// nothing. Threads a `stop all` stopped do not count. Returns the ids of the threads started.
     pub fn start_hats(&mut self, hat: i64, arg: &str) -> Vec<u64> {
         self.start_hats_in(hat, arg, None)
     }
@@ -348,27 +354,23 @@ impl Runtime {
     /// [`Runtime::start_hats`] restricted to one target, as a click is.
     pub fn start_hats_in(&mut self, hat: i64, arg: &str, only: Option<usize>) -> Vec<u64> {
         let mut started = Vec::new();
-        let order = match only {
-            Some(target) => vec![target],
-            None => self.order.clone(),
-        };
+        // Scripts keep their argument in upper case, so only this one needs converting.
+        let wanted = if hat == HAT_BROADCAST || hat == HAT_KEY { arg.to_uppercase() } else { String::new() };
         // scratch-vm's `restartExistingThreads`: false for key hats, true for the rest.
         let restart = hat != HAT_KEY;
-        for target in order.into_iter().rev() {
+        let count = if only.is_some() { 1 } else { self.order.len() };
+        for k in (0..count).rev() {
+            let target = only.unwrap_or_else(|| self.order[k]);
             for script in 0..self.targets[target].scripts.len() {
                 let s = &self.targets[target].scripts[script];
-                if s.hat != hat {
+                if s.hat != hat || s.arg != wanted && (hat == HAT_BROADCAST || hat == HAT_KEY) {
                     continue;
                 }
-                let matches = match hat {
-                    HAT_BROADCAST | HAT_KEY => s.arg.to_uppercase() == arg.to_uppercase(),
-                    _ => true,
-                };
-                if !matches {
-                    continue;
-                }
-                let existing = self.threads.iter().position(|t| t.target == target && t.script == script);
-                if !restart && existing.is_some_and(|i| self.threads[i].status != Status::Done) {
+                let existing = self.threads.iter().position(|t| t.target == target && t.script == script && !t.stopped);
+                // A killed thread counts as done, as scratch-vm retires a stopped thread at once.
+                if !restart
+                    && existing.is_some_and(|i| self.threads[i].status != Status::Done && !self.threads[i].killed)
+                {
                     continue;
                 }
                 let thread = self.new_thread(target, script);
@@ -394,11 +396,15 @@ impl Runtime {
     /// is the rest. Returns the targets whose bubbles need clearing. scratch-vm's `stopAll` swaps
     /// in an empty thread list while the sequencer still iterates the old one, so the threads after
     /// the stopping one in the current pass get one more step before they are gone; those are
-    /// killed after that step instead of at once.
-    fn kill_all(&mut self) -> Vec<usize> {
+    /// killed after that step instead of at once. Threads started after the stop belong to the new
+    /// list, which the pass does not reach (see `pass_end`), and a second stop in the same pass
+    /// empties that list again.
+    pub(crate) fn kill_all(&mut self) -> Vec<usize> {
+        let old_end = self.stepping.map(|_| *self.pass_end.get_or_insert(self.threads.len()));
         for (i, t) in self.threads.iter_mut().enumerate() {
-            match self.stepping {
-                Some(current) if i > current => t.stop_after_step = true,
+            t.stopped = true;
+            match (self.stepping, old_end) {
+                (Some(current), Some(end)) if i > current && i < end => t.stop_after_step = true,
                 _ => t.kill(),
             }
         }
@@ -453,7 +459,7 @@ impl Runtime {
             let mut stopped = false;
             let mut i = 0;
             // SAFETY: as above; each borrow ends before the next step resumes a thread.
-            while i < unsafe { (*rt).threads.len() } {
+            while i < unsafe { (*rt).pass_end.unwrap_or((*rt).threads.len()) } {
                 let (status, skip) = {
                     // SAFETY: as above.
                     let t = unsafe { &(&(*rt).threads)[i] };
@@ -482,6 +488,14 @@ impl Runtime {
             // SAFETY: no thread runs here.
             let done = unsafe {
                 let r = &mut *rt;
+                // After a `stop all`, the old list is gone with the pass: the threads it skipped
+                // (those waiting for the next frame) never run again.
+                if r.pass_end.take().is_some() {
+                    for t in r.threads.iter_mut().filter(|t| t.stop_after_step) {
+                        t.stop_after_step = false;
+                        t.kill();
+                    }
+                }
                 if stopped || r.threads.iter().any(|t| t.status == Status::Done) {
                     r.threads.retain(|t| t.status != Status::Done);
                 }

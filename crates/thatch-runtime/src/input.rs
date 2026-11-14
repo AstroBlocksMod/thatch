@@ -84,19 +84,25 @@ impl Runtime {
     }
 
     /// The mouse moved to a point in Scratch coordinates, which scratch-vm rounds and clamps to the
-    /// stage.
+    /// stage. A NaN coordinate is ignored and the old one kept, as scratch-vm's mouse skips a
+    /// coordinate that is not truthy, so the mouse position is never NaN.
     pub fn mouse_move(&mut self, x: f64, y: f64) {
-        self.mouse_x = round(clamp(x, -STAGE_WIDTH / 2.0, STAGE_WIDTH / 2.0));
-        self.mouse_y = round(clamp(y, -STAGE_HEIGHT / 2.0, STAGE_HEIGHT / 2.0));
+        if !x.is_nan() {
+            self.mouse_x = round(clamp(x, -STAGE_WIDTH / 2.0, STAGE_WIDTH / 2.0));
+        }
+        if !y.is_nan() {
+            self.mouse_y = round(clamp(y, -STAGE_HEIGHT / 2.0, STAGE_HEIGHT / 2.0));
+        }
     }
 
     /// The mouse button went down or up over `target` (None outside the stage). A target that is
     /// not draggable is clicked as the button goes down, a draggable one as it comes up; both click
-    /// hats on that target start then. A repeated report of the same state does nothing.
-    pub fn mouse_button(&mut self, down: bool, target: Option<usize>) {
+    /// hats on that target start then. A repeated report of the same state does nothing, and
+    /// neither does a release that ends a drag (`dragged`), as in scratch-vm's mouse.
+    pub fn mouse_button(&mut self, down: bool, target: Option<usize>, dragged: bool) {
         let was_down = self.mouse_down;
         self.mouse_down = down;
-        if was_down == down {
+        if was_down == down || dragged {
             return;
         }
         let Some(target) = target.filter(|t| *t < self.targets.len()) else { return };
@@ -132,6 +138,28 @@ mod tests {
         assert_eq!(key_string_to_scratch_key("Shift"), None);
         assert_eq!(key_string_to_scratch_key(""), None);
         assert_eq!(key_string_to_scratch_key("😀"), None);
+    }
+
+    #[test]
+    fn the_mouse_ignores_nan_and_stays_on_the_stage() {
+        let host = thatch_abi::Host {
+            data: std::ptr::null_mut(),
+            say: None,
+            now_ms: None,
+            sprite_changed: None,
+            measure: None,
+        };
+        let rt = Runtime::create(host, 1);
+        // SAFETY: a runtime of this test only, with no threads and no callbacks.
+        unsafe {
+            (*rt).mouse_move(10.4, 1000.0);
+            assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (10.0, 180.0));
+            (*rt).mouse_move(f64::NAN, -20.0);
+            assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (10.0, -20.0));
+            (*rt).mouse_move(5.0, f64::NAN);
+            assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (5.0, -20.0));
+            Runtime::destroy(rt);
+        }
     }
 
     #[test]

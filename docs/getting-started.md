@@ -37,7 +37,7 @@ A headless run has no keyboard or mouse, so `--input FILE` plays one from a scri
 25 mouse up Cat
 ```
 
-`key down` and `key up` take a key as the `when key pressed` menu names it. `mouse X Y` moves the pointer to Scratch coordinates, and `mouse down` and `mouse up` press and release the button over the named sprite, or over the stage when no name is given. The run goes on until no script is left and no event is still to come. `samples/input` is a complete example, and the same script format feeds the scratch-vm oracle in `tools/scratch-vm-oracle`.
+`key down` and `key up` take a key as the `when key pressed` menu names it. `mouse X Y` moves the pointer to Scratch coordinates, and `mouse down` and `mouse up` press and release the button over the named sprite, or over the stage when no name is given; naming a target the project lacks is an error. Words may be separated by any whitespace, and a key or sprite name is the rest of the line. The run goes on until no script is left and no event is still to come. `samples/input` is a complete example, and the same script format feeds the scratch-vm oracle in `tools/scratch-vm-oracle`.
 
 ## Building an executable
 

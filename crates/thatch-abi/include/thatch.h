@@ -140,14 +140,16 @@ void thatch_runtime_start_hats(ThatchRuntime *rt, int64_t hat, const char *arg, 
 void thatch_runtime_key(ThatchRuntime *rt, const char *key, size_t len, int8_t down);
 
 /* The mouse moved to a point in Scratch coordinates (x from -240 to 240, y from -180 to 180,
- * origin in the middle, y up); the runtime rounds and clamps it as scratch-vm does. */
+ * origin in the middle, y up); the runtime rounds and clamps it as scratch-vm does. A NaN
+ * coordinate is ignored. */
 void thatch_runtime_mouse_move(ThatchRuntime *rt, double x, double y);
 
 /* The mouse button went down or up over `target`, the frontmost target under the pointer as
  * the host sees it (the stage when no sprite is there), or -1 outside the stage. A click on a
  * target that is not draggable starts its click hats as the button goes down; on a draggable
- * one as it comes up. Nothing starts when the button state did not change. */
-void thatch_runtime_mouse_button(ThatchRuntime *rt, int8_t down, int64_t target);
+ * one as it comes up. Nothing starts when the button state did not change, or when `dragged`
+ * says the release ends a drag of a sprite. */
+void thatch_runtime_mouse_button(ThatchRuntime *rt, int8_t down, int64_t target, int8_t dragged);
 
 /* Whether the player may drag a target, which decides when its clicks count. */
 int8_t thatch_runtime_target_draggable(const ThatchRuntime *rt, int64_t target);

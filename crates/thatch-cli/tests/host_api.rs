@@ -162,12 +162,17 @@ fn sprite_of(rt: *mut OpaqueRuntime, target: i64) -> Sprite {
 const CLICKS: &str = r#"{"targets":[
   {"isStage":true,"name":"Stage","costumes":[{"name":"backdrop1"}],"blocks":{
     "h":{"opcode":"event_whenstageclicked","next":"s","parent":null,"inputs":{},"fields":{},"topLevel":true},
-    "s":{"opcode":"looks_say","next":null,"parent":"h","inputs":{"MESSAGE":[1,[10,"stage"]]},"fields":{},"topLevel":false}}},
+    "s":{"opcode":"looks_say","next":null,"parent":"h","inputs":{"MESSAGE":[1,[10,"stage"]]},"fields":{},"topLevel":false},
+    "a":{"opcode":"event_whenkeypressed","next":"as","parent":null,"inputs":{},"fields":{"KEY_OPTION":["any",null]},"topLevel":true},
+    "as":{"opcode":"looks_say","next":null,"parent":"a","inputs":{"MESSAGE":[1,[10,"any"]]},"fields":{},"topLevel":false}}},
   {"isStage":false,"name":"Cat","layerOrder":1,"costumes":[{"name":"a"}],"blocks":{
     "h":{"opcode":"event_whenthisspriteclicked","next":"s","parent":null,"inputs":{},"fields":{},"topLevel":true},
     "s":{"opcode":"looks_say","next":null,"parent":"h","inputs":{"MESSAGE":[1,[10,"cat"]]},"fields":{},"topLevel":false},
     "k":{"opcode":"event_whenkeypressed","next":"ks","parent":null,"inputs":{},"fields":{"KEY_OPTION":["left arrow",null]},"topLevel":true},
-    "ks":{"opcode":"looks_say","next":null,"parent":"k","inputs":{"MESSAGE":[1,[10,"left"]]},"fields":{},"topLevel":false}}},
+    "ks":{"opcode":"looks_say","next":null,"parent":"k","inputs":{"MESSAGE":[1,[10,"left"]]},"fields":{},"topLevel":false},
+    "r":{"opcode":"event_whenkeypressed","next":"rs","parent":null,"inputs":{},"fields":{"KEY_OPTION":["right arrow",null]},"topLevel":true},
+    "rs":{"opcode":"looks_say","next":"rf","parent":"r","inputs":{"MESSAGE":[1,[10,"right"]]},"fields":{},"topLevel":false},
+    "rf":{"opcode":"control_forever","next":null,"parent":"rs","inputs":{},"fields":{},"topLevel":false}}},
   {"isStage":false,"name":"Dog","layerOrder":2,"draggable":true,"costumes":[{"name":"d"}],"blocks":{
     "h":{"opcode":"event_whenthisspriteclicked","next":"s","parent":null,"inputs":{},"fields":{},"topLevel":true},
     "s":{"opcode":"looks_say","next":null,"parent":"h","inputs":{"MESSAGE":[1,[10,"dog"]]},"fields":{},"topLevel":false}}}
@@ -181,6 +186,10 @@ unsafe extern "C" fn record_say(
     len: usize,
     _think: i8,
 ) {
+    // A cleared bubble, as the headless host ignores it.
+    if len == 0 {
+        return;
+    }
     // SAFETY: `data` is the `Vec<String>` the test registered; the runtime passes `len` bytes of UTF-8.
     unsafe {
         let said = &mut *data.cast::<Vec<String>>();
@@ -213,33 +222,54 @@ fn clicks_and_keys_start_the_right_hats() {
         assert_eq!(api::thatch_runtime_target_draggable(rt, 2), 1);
         let frame = |rt| assert_eq!(api::thatch_runtime_frame(rt), 0);
 
-        // The Cat is clicked as the button goes down, and only once per press.
-        api::thatch_runtime_mouse_button(rt, 1, 1);
-        api::thatch_runtime_mouse_button(rt, 1, 1);
+        // The Cat is clicked as the button goes down, and only once per press: a second report of
+        // the button down, after the first click ran, clicks nothing.
+        api::thatch_runtime_mouse_button(rt, 1, 1, 0);
         frame(rt);
-        api::thatch_runtime_mouse_button(rt, 0, 1);
+        api::thatch_runtime_mouse_button(rt, 1, 1, 0);
         frame(rt);
-        assert_eq!(said, ["cat"]);
-        // The draggable Dog is clicked as the button comes up.
-        api::thatch_runtime_mouse_button(rt, 1, 2);
+        api::thatch_runtime_mouse_button(rt, 0, 1, 0);
         frame(rt);
         assert_eq!(said, ["cat"]);
-        api::thatch_runtime_mouse_button(rt, 0, 2);
+        // The draggable Dog is clicked as the button comes up, but not at the end of a drag.
+        api::thatch_runtime_mouse_button(rt, 1, 2, 0);
+        frame(rt);
+        assert_eq!(said, ["cat"]);
+        api::thatch_runtime_mouse_button(rt, 0, 2, 0);
+        frame(rt);
+        assert_eq!(said, ["cat", "dog"]);
+        api::thatch_runtime_mouse_button(rt, 1, 2, 0);
+        api::thatch_runtime_mouse_button(rt, 0, 2, 1);
         frame(rt);
         assert_eq!(said, ["cat", "dog"]);
         // A press on the stage starts its hat; one outside the stage starts nothing.
-        api::thatch_runtime_mouse_button(rt, 1, 0);
+        api::thatch_runtime_mouse_button(rt, 1, 0, 0);
         frame(rt);
-        api::thatch_runtime_mouse_button(rt, 0, -1);
-        api::thatch_runtime_mouse_button(rt, 1, -1);
+        api::thatch_runtime_mouse_button(rt, 0, -1, 0);
+        api::thatch_runtime_mouse_button(rt, 1, -1, 0);
         frame(rt);
         assert_eq!(said, ["cat", "dog", "stage"]);
-        // Keys by their browser names, and modifiers are ignored.
-        api::thatch_runtime_mouse_button(rt, 0, -1);
+        // Keys by their browser names. A modifier is no key at all, so it starts not even the
+        // `any` hat; a real key starts its own hat and then the stage's `any` hat.
+        api::thatch_runtime_mouse_button(rt, 0, -1, 0);
         api::thatch_runtime_key(rt, c"Shift".as_ptr(), 5, 1);
+        frame(rt);
+        assert_eq!(said, ["cat", "dog", "stage"]);
         api::thatch_runtime_key(rt, c"ArrowLeft".as_ptr(), 9, 1);
         frame(rt);
-        assert_eq!(said, ["cat", "dog", "stage", "left"]);
+        assert_eq!(said, ["cat", "dog", "stage", "left", "any"]);
+        said.clear();
+        // A key hat leaves its running script alone, but one the host stopped starts again even
+        // before a frame has let the stopped one finish.
+        api::thatch_runtime_key(rt, c"ArrowRight".as_ptr(), 10, 1);
+        frame(rt);
+        api::thatch_runtime_key(rt, c"ArrowRight".as_ptr(), 10, 1);
+        frame(rt);
+        assert_eq!(said, ["right", "any", "any"]);
+        api::thatch_runtime_stop_all(rt);
+        api::thatch_runtime_key(rt, c"ArrowRight".as_ptr(), 10, 1);
+        frame(rt);
+        assert_eq!(said, ["right", "any", "any", "right", "any"]);
         api::thatch_runtime_mouse_move(rt, 1000.0, -33.5);
         api::thatch_runtime_destroy(rt);
     }

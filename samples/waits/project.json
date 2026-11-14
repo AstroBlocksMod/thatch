@@ -1,0 +1,496 @@
+{
+ "targets": [
+  {
+   "isStage": true,
+   "name": "Stage",
+   "variables": {},
+   "lists": {},
+   "broadcasts": {
+    "bn": "nobody"
+   },
+   "blocks": {},
+   "comments": {},
+   "currentCostume": 0,
+   "costumes": [
+    {
+     "name": "backdrop1",
+     "assetId": "00000000000000000000000000000000",
+     "md5ext": "00000000000000000000000000000000.svg",
+     "dataFormat": "svg",
+     "rotationCenterX": 0,
+     "rotationCenterY": 0
+    }
+   ],
+   "sounds": [],
+   "volume": 100,
+   "layerOrder": 0,
+   "tempo": 60,
+   "videoTransparency": 50,
+   "videoState": "off"
+  },
+  {
+   "isStage": false,
+   "name": "Dog",
+   "variables": {},
+   "lists": {},
+   "broadcasts": {},
+   "blocks": {
+    "w17": {
+     "opcode": "event_whenflagclicked",
+     "next": "w18",
+     "parent": null,
+     "inputs": {},
+     "fields": {},
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "w18": {
+     "opcode": "looks_say",
+     "next": "w19",
+     "parent": "w17",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "dog 1"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w19": {
+     "opcode": "control_wait",
+     "next": "w20",
+     "parent": "w18",
+     "inputs": {
+      "DURATION": [
+       1,
+       [
+        5,
+        "0"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w20": {
+     "opcode": "looks_say",
+     "next": "w21",
+     "parent": "w19",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "dog 2"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w21": {
+     "opcode": "control_wait",
+     "next": "w22",
+     "parent": "w20",
+     "inputs": {
+      "DURATION": [
+       1,
+       [
+        5,
+        "0.5"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w22": {
+     "opcode": "looks_say",
+     "next": "w23",
+     "parent": "w21",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "dog 3"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w23": {
+     "opcode": "control_wait",
+     "next": "w24",
+     "parent": "w22",
+     "inputs": {
+      "DURATION": [
+       1,
+       [
+        5,
+        "0"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w24": {
+     "opcode": "looks_say",
+     "next": null,
+     "parent": "w23",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "dog 4"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    }
+   },
+   "comments": {},
+   "currentCostume": 0,
+   "costumes": [
+    {
+     "name": "c",
+     "assetId": "00000000000000000000000000000000",
+     "md5ext": "00000000000000000000000000000000.svg",
+     "dataFormat": "svg",
+     "rotationCenterX": 0,
+     "rotationCenterY": 0
+    }
+   ],
+   "sounds": [],
+   "volume": 100,
+   "layerOrder": 1,
+   "visible": true,
+   "x": 0,
+   "y": 0,
+   "size": 100,
+   "direction": 90,
+   "draggable": false,
+   "rotationStyle": "all around"
+  },
+  {
+   "isStage": false,
+   "name": "Cat",
+   "variables": {},
+   "lists": {},
+   "broadcasts": {},
+   "blocks": {
+    "w2": {
+     "opcode": "procedures_definition",
+     "next": "w3",
+     "parent": null,
+     "inputs": {
+      "custom_block": [
+       1,
+       "w1"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "w3": {
+     "opcode": "looks_say",
+     "next": "w4",
+     "parent": "w2",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "fast starts"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w4": {
+     "opcode": "control_wait",
+     "next": "w5",
+     "parent": "w3",
+     "inputs": {
+      "DURATION": [
+       1,
+       [
+        5,
+        "0"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w5": {
+     "opcode": "looks_say",
+     "next": "w6",
+     "parent": "w4",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "fast after wait 0"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w6": {
+     "opcode": "event_broadcastandwait",
+     "next": "w7",
+     "parent": "w5",
+     "inputs": {
+      "BROADCAST_INPUT": [
+       1,
+       [
+        11,
+        "nobody",
+        "bn"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w7": {
+     "opcode": "looks_say",
+     "next": null,
+     "parent": "w6",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "fast after broadcast"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w1": {
+     "opcode": "procedures_prototype",
+     "next": null,
+     "parent": "w2",
+     "inputs": {},
+     "fields": {},
+     "shadow": true,
+     "topLevel": false,
+     "mutation": {
+      "tagName": "mutation",
+      "children": [],
+      "proccode": "fast",
+      "argumentids": "[]",
+      "argumentnames": "[]",
+      "argumentdefaults": "[]",
+      "warp": "true"
+     }
+    },
+    "w9": {
+     "opcode": "procedures_definition",
+     "next": "w10",
+     "parent": null,
+     "inputs": {
+      "custom_block": [
+       1,
+       "w8"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "w10": {
+     "opcode": "looks_say",
+     "next": "w11",
+     "parent": "w9",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "slow starts"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w11": {
+     "opcode": "control_wait",
+     "next": "w12",
+     "parent": "w10",
+     "inputs": {
+      "DURATION": [
+       1,
+       [
+        5,
+        "0"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w12": {
+     "opcode": "looks_say",
+     "next": null,
+     "parent": "w11",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "slow after wait 0"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w8": {
+     "opcode": "procedures_prototype",
+     "next": null,
+     "parent": "w9",
+     "inputs": {},
+     "fields": {},
+     "shadow": true,
+     "topLevel": false,
+     "mutation": {
+      "tagName": "mutation",
+      "children": [],
+      "proccode": "slow",
+      "argumentids": "[]",
+      "argumentnames": "[]",
+      "argumentdefaults": "[]",
+      "warp": "false"
+     }
+    },
+    "w13": {
+     "opcode": "event_whenflagclicked",
+     "next": "w14",
+     "parent": null,
+     "inputs": {},
+     "fields": {},
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "w14": {
+     "opcode": "procedures_call",
+     "next": "w15",
+     "parent": "w13",
+     "inputs": {},
+     "fields": {},
+     "shadow": false,
+     "topLevel": false,
+     "mutation": {
+      "tagName": "mutation",
+      "children": [],
+      "proccode": "fast",
+      "argumentids": "[]",
+      "warp": "true"
+     }
+    },
+    "w15": {
+     "opcode": "control_wait",
+     "next": "w16",
+     "parent": "w14",
+     "inputs": {
+      "DURATION": [
+       1,
+       [
+        5,
+        "0.5"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "w16": {
+     "opcode": "procedures_call",
+     "next": null,
+     "parent": "w15",
+     "inputs": {},
+     "fields": {},
+     "shadow": false,
+     "topLevel": false,
+     "mutation": {
+      "tagName": "mutation",
+      "children": [],
+      "proccode": "slow",
+      "argumentids": "[]",
+      "warp": "false"
+     }
+    }
+   },
+   "comments": {},
+   "currentCostume": 0,
+   "costumes": [
+    {
+     "name": "c",
+     "assetId": "00000000000000000000000000000000",
+     "md5ext": "00000000000000000000000000000000.svg",
+     "dataFormat": "svg",
+     "rotationCenterX": 0,
+     "rotationCenterY": 0
+    }
+   ],
+   "sounds": [],
+   "volume": 100,
+   "layerOrder": 2,
+   "visible": true,
+   "x": 0,
+   "y": 0,
+   "size": 100,
+   "direction": 90,
+   "draggable": false,
+   "rotationStyle": "all around"
+  }
+ ],
+ "monitors": [],
+ "extensions": [],
+ "meta": {
+  "semver": "3.0.0",
+  "vm": "0.2.0",
+  "agent": ""
+ }
+}

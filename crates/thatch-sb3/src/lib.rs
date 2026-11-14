@@ -199,8 +199,13 @@ impl Mutation {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Primitive {
     /// Number, positive number, positive integer, integer, angle, color or text shadows (types 4
-    /// through 10). The text is the value as written in the file.
+    /// through 10) whose value is a JSON string, as the Scratch editor writes them. The text is the
+    /// value as written in the file.
     Text(String),
+    /// The same shadows with a JSON number as their value, as converted Scratch 2 projects and
+    /// other tools write them. scratch-vm keeps such a value a number, which blocks that ask
+    /// whether their input is a number can tell apart from text.
+    Number(f64),
     Broadcast {
         name: String,
         id: String,
@@ -249,7 +254,10 @@ pub fn parse_primitive(raw: &Value) -> Option<Primitive> {
     let text = parts.get(1).map(json_to_text).unwrap_or_default();
     let id = parts.get(2).map(json_to_text).unwrap_or_default();
     Some(match kind {
-        4..=10 => Primitive::Text(text),
+        4..=10 => match parts.get(1).and_then(Value::as_f64) {
+            Some(n) if parts.get(1).is_some_and(Value::is_number) => Primitive::Number(n),
+            _ => Primitive::Text(text),
+        },
         11 => Primitive::Broadcast { name: text, id },
         12 => Primitive::Variable { name: text, id },
         13 => Primitive::List { name: text, id },
@@ -425,6 +433,9 @@ mod tests {
         let stage = project.stage().unwrap();
         let block = stage.block("a").unwrap();
         assert_eq!(parse_input(&block.inputs["MESSAGE"]), Input::Primitive(Primitive::Text("hi".into())));
+        assert_eq!(parse_primitive(&serde_json::json!([4, "2"])), Some(Primitive::Text("2".into())));
+        assert_eq!(parse_primitive(&serde_json::json!([4, 2])), Some(Primitive::Number(2.0)));
+        assert_eq!(parse_primitive(&serde_json::json!([10, 1.5])), Some(Primitive::Number(1.5)));
         assert_eq!(parse_input(&block.inputs["OTHER"]), Input::Block("b".into()));
         assert_eq!(parse_input(&block.inputs["COND"]), Input::Block("c".into()));
         assert_eq!(field_value(&block, "VARIABLE").as_deref(), Some("score"));

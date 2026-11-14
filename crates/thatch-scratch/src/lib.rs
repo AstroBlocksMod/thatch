@@ -549,7 +549,10 @@ impl<'a> Lowerer<'a> {
             }
             "data_setvariableto" => {
                 let var = self.variable(block);
-                let value = self.input_raw(block, "VALUE", Type::Str);
+                let value = match var {
+                    VarRef::TargetAny(_) | VarRef::StageAny(_) => self.input_dynamic(block, "VALUE"),
+                    _ => self.input_raw(block, "VALUE", Type::Str),
+                };
                 let value = self.store_value(var, value);
                 out.push(Stmt::Set(var, value));
             }
@@ -730,7 +733,8 @@ impl<'a> Lowerer<'a> {
             let arg = match want {
                 Type::Bool => self.input(block, arg_id, Type::Bool),
                 _ => match raw {
-                    Some(_) => self.input_raw(block, arg_id, Type::Str),
+                    Some(_) if want == Type::Num => self.input_raw(block, arg_id, Type::Str),
+                    Some(_) => self.input_dynamic(block, arg_id),
                     None => Expr::Str(self.program.intern("")),
                 },
             };
@@ -821,6 +825,18 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// An input stored in a dynamically typed variable or parameter. A typed value stays text, as
+    /// it is in scratch-vm, since the slot keeps it for blocks that tell text from numbers (see
+    /// [`Lowerer::input_text`]); a numeric slot gets the number, which is the same to every block
+    /// that may read it.
+    fn input_dynamic(&mut self, block: &Block, name: &str) -> Expr {
+        let raw = block.inputs.get(name).cloned().unwrap_or(serde_json::Value::Null);
+        if let Input::Primitive(Primitive::Text(s)) = parse_input(&raw) {
+            return Expr::Str(self.program.intern(&s));
+        }
+        self.input_raw(block, name, Type::Str)
+    }
+
     fn primitive(&mut self, p: &Primitive) -> Expr {
         match p {
             Primitive::Text(s) => {
@@ -830,6 +846,8 @@ impl<'a> Lowerer<'a> {
                     Expr::Str(self.program.intern(s))
                 }
             }
+            // A number in the file is a number to scratch-vm too.
+            Primitive::Number(n) => Expr::Num(*n),
             Primitive::Broadcast { name, .. } => Expr::Str(self.program.intern(name)),
             Primitive::Variable { name, id } => Expr::Var(self.resolve_variable(id, name)),
             Primitive::List { .. } => {
@@ -1019,14 +1037,30 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers an input whose block asks whether its value is a number: `key pressed?` and the
-    /// costume and backdrop blocks treat a number and the same digits as text differently, and a
-    /// value typed into the project is always text to scratch-vm, so it stays text here.
+    /// costume and backdrop blocks treat a number and the same digits as text differently. A value
+    /// typed into the project is text to scratch-vm unless the file stores a JSON number, so it
+    /// stays as the file has it. A variable or parameter read here is never specialized to a
+    /// number, since a numeric slot could not tell the text "2" from the number 2.
     fn input_text(&mut self, block: &Block, name: &str) -> Expr {
         let raw = block.inputs.get(name).cloned().unwrap_or(serde_json::Value::Null);
         if let Input::Primitive(Primitive::Text(s)) = parse_input(&raw) {
             return Expr::Str(self.program.intern(&s));
         }
-        self.input_raw(block, name, Type::Str)
+        let e = self.input_raw(block, name, Type::Str);
+        match e {
+            Expr::Var(var @ (VarRef::TargetNum(_) | VarRef::StageNum(_))) => self.demote_var(var),
+            Expr::Var(VarRef::Param(i)) => {
+                if let Some(pi) = self.proc {
+                    let ty = &mut self.types.procs[self.target][pi].param_types[i as usize];
+                    if *ty == Type::Num {
+                        *ty = Type::Any;
+                        self.changed = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+        e
     }
 
     /// The value of a menu block's field, as a string.
@@ -1212,6 +1246,34 @@ mod tests {
             ));
         }
         project(&format!("{{{}}}", blocks.join(",")), "{}")
+    }
+
+    #[test]
+    fn parameters_read_as_costumes_keep_their_text() {
+        // `define pick (c)` switches to costume `c`, and the flag calls it with the text "2".
+        let p = project(
+            r#"{"d":{"opcode":"procedures_definition","next":"s","parent":null,"inputs":{"custom_block":[1,"pr"]},"fields":{},"topLevel":true},
+            "pr":{"opcode":"procedures_prototype","next":null,"parent":"d","inputs":{"a1":[1,"ar"]},"fields":{},"shadow":true,"topLevel":false,
+              "mutation":{"tagName":"mutation","children":[],"proccode":"pick %s","argumentids":"[\"a1\"]","argumentnames":"[\"c\"]","argumentdefaults":"[\"\"]","warp":"false"}},
+            "ar":{"opcode":"argument_reporter_string_number","next":null,"parent":"pr","inputs":{},"fields":{"VALUE":["c",null]},"shadow":true,"topLevel":false},
+            "s":{"opcode":"looks_switchcostumeto","next":null,"parent":"d","inputs":{"COSTUME":[3,"r",[10,""]]},"fields":{},"topLevel":false},
+            "r":{"opcode":"argument_reporter_string_number","next":null,"parent":"s","inputs":{},"fields":{"VALUE":["c",null]},"topLevel":false},
+            "h":{"opcode":"event_whenflagclicked","next":"c","parent":null,"inputs":{},"fields":{},"topLevel":true},
+            "c":{"opcode":"procedures_call","next":null,"parent":"h","inputs":{"a1":[1,[10,"2"]]},"fields":{},"topLevel":false,
+              "mutation":{"tagName":"mutation","children":[],"proccode":"pick %s","argumentids":"[\"a1\"]","warp":"false"}}}"#,
+            "{}",
+        );
+        let lowered = lower(&p).unwrap();
+        let pick = lowered.program.functions.iter().find(|f| f.name.ends_with("pick %s")).unwrap();
+        assert_eq!(pick.params[0].ty, Type::Any, "{}", thatch_ir::dump(&lowered.program));
+        let call = lowered.program.functions.iter().flat_map(|f| &f.body).find_map(|s| match s {
+            Stmt::Call { args, .. } => Some(args[0].clone()),
+            _ => None,
+        });
+        assert!(
+            matches!(&call, Some(Expr::Cast(Type::Any, inner)) if matches!(**inner, Expr::Str(_))),
+            "the text \"2\" is passed as text: {call:?}"
+        );
     }
 
     #[test]

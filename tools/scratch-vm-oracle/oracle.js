@@ -24,27 +24,41 @@ const inputFile = restArgs.find((a) => a.endsWith(".txt"));
 const timeoutArg = restArgs.find((a) => !a.endsWith(".txt"));
 const TIMEOUT_MS = Number(timeoutArg || 20) * 1000;
 
-// The input script: "FRAME key down|up NAME", "FRAME mouse X Y", "FRAME mouse down|up [TARGET]".
+// The first whitespace-separated word of a string and the trimmed rest, as the headless host
+// splits its input lines, so a key or target name keeps the spaces inside it.
+function firstWord(s) {
+  const m = /^\s*(\S*)\s*([\s\S]*?)\s*$/.exec(s);
+  return [m[1], m[2]];
+}
+
+// The input script: "FRAME key down|up NAME", "FRAME mouse X Y", "FRAME mouse down|up [TARGET]",
+// with words separated by any whitespace.
 function parseInput(text) {
   const events = [];
   text.split("\n").forEach((raw, i) => {
     const line = raw.trim();
     if (line === "" || line.startsWith("#")) return;
-    const [frame, kind, ...rest] = line.split(" ");
+    const bad = () => new Error(`input line ${i + 1}: cannot read ${JSON.stringify(raw)}`);
+    const [frame, afterFrame] = firstWord(line);
+    const [kind, rest] = firstWord(afterFrame);
+    const [first, afterFirst] = firstWord(rest);
     const event = { frame: Number(frame), kind };
-    if (kind === "key") {
-      event.down = rest[0] === "down";
-      event.key = rest.slice(1).join(" ");
-    } else if (kind === "mouse" && (rest[0] === "down" || rest[0] === "up")) {
+    if (kind === "key" && (first === "down" || first === "up") && afterFirst !== "") {
+      event.down = first === "down";
+      event.key = afterFirst;
+    } else if (kind === "mouse" && (first === "down" || first === "up")) {
       event.kind = "button";
-      event.down = rest[0] === "down";
-      event.target = rest.slice(1).join(" ");
+      event.down = first === "down";
+      event.target = afterFirst;
     } else if (kind === "mouse") {
-      event.x = Number(rest[0]);
-      event.y = Number(rest[1]);
+      const [y, extra] = firstWord(afterFirst);
+      event.x = Number(first);
+      event.y = Number(y);
+      if (first === "" || y === "" || Number.isNaN(event.x) || Number.isNaN(event.y) || extra !== "") throw bad();
     } else {
-      throw new Error(`input line ${i + 1}: cannot read ${JSON.stringify(raw)}`);
+      throw bad();
     }
+    if (Number.isNaN(event.frame) || frame === "") throw bad();
     events.push(event);
   });
   return events.sort((a, b) => a.frame - b.frame);

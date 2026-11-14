@@ -228,9 +228,9 @@ pub unsafe extern "C" fn thatch_runtime_mouse_move(rt: *mut OpaqueRuntime, x: f6
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn thatch_runtime_mouse_button(rt: *mut OpaqueRuntime, down: i8, target: i64) {
+pub unsafe extern "C" fn thatch_runtime_mouse_button(rt: *mut OpaqueRuntime, down: i8, target: i64, dragged: i8) {
     // SAFETY: as `thatch_runtime_green_flag`.
-    unsafe { (*rt.cast::<Runtime>()).mouse_button(down != 0, usize::try_from(target).ok()) }
+    unsafe { (*rt.cast::<Runtime>()).mouse_button(down != 0, usize::try_from(target).ok(), dragged != 0) }
 }
 
 #[unsafe(no_mangle)]
@@ -762,13 +762,24 @@ pub unsafe extern "C" fn thatch_yield(ctx: *mut ThreadCtx) {
     unsafe { inner(ctx).loop_yield() }
 }
 
-/// Waits until `end_ms` on the host's clock, yielding `how` each time. Returns false when the
-/// thread was killed meanwhile.
+/// Whether the clock can move while a thread runs: only the host's can, not the virtual one.
+unsafe fn clock_moves(ctx: *mut ThreadCtx) -> bool {
+    // SAFETY: as `thatch_temps_clear`.
+    unsafe { runtime(ctx).host.now_ms.is_some() }
+}
+
+/// Waits until `end_ms` on the host's clock, pausing `how` each time (see `ThreadInner::pause`).
+/// Returns false when the thread was killed meanwhile.
 unsafe fn wait_until(ctx: *mut ThreadCtx, end_ms: f64, how: Yield) -> bool {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
+        let clock = clock_moves(ctx);
         loop {
-            inner(ctx).suspend(how);
+            // In warp mode scratch-vm checks again at once instead of after other threads ran.
+            if how == Yield::Wait && inner(ctx).in_warp() && rt(ctx).now_ms() >= end_ms {
+                return true;
+            }
+            inner(ctx).pause(how, clock);
             if inner(ctx).killed() {
                 return false;
             }
@@ -854,7 +865,8 @@ pub unsafe extern "C" fn thatch_broadcast_wait(ctx: *mut ThreadCtx, name: Handle
                 return;
             }
             let all_tick = waiting.iter().all(|s| **s == crate::thread::Status::TickYield);
-            inner(ctx).suspend(if all_tick { Yield::Tick } else { Yield::Wait });
+            // Only other threads can finish the ones it waits for, so spinning in warp mode is no use.
+            inner(ctx).pause(if all_tick { Yield::Tick } else { Yield::Wait }, false);
             if inner(ctx).killed() {
                 return;
             }
@@ -1008,7 +1020,8 @@ pub unsafe extern "C" fn thatch_point_towards(ctx: *mut ThreadCtx, name: Handle)
 }
 
 /// `glide`: moves a little every time the thread is stepped until the time is up, then lands on
-/// the end point. A duration of 0 or less lands at once without yielding.
+/// the end point. A duration of 0 or less lands at once without yielding. In warp mode it moves
+/// in place without letting other threads run, as `wait` does (see `ThreadInner::pause`).
 unsafe fn glide(ctx: *mut ThreadCtx, secs: f64, end_x: f64, end_y: f64) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
@@ -1020,8 +1033,9 @@ unsafe fn glide(ctx: *mut ThreadCtx, secs: f64, end_x: f64, end_y: f64) {
         }
         let (start_x, start_y) = (runtime(ctx).targets[target].x, runtime(ctx).targets[target].y);
         let started = rt(ctx).now_ms();
+        let clock = clock_moves(ctx);
         loop {
-            inner(ctx).suspend(Yield::Wait);
+            inner(ctx).pause(Yield::Wait, clock);
             if inner(ctx).killed() {
                 return;
             }

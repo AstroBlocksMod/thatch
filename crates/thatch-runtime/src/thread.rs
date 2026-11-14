@@ -91,6 +91,9 @@ pub struct Thread {
     /// Set by a `stop all` from a thread earlier in the current pass: scratch-vm still steps the
     /// threads after it once more before dropping them, so this one is killed after its step.
     pub stop_after_step: bool,
+    /// Set on every thread a `stop all` stops. scratch-vm's sequencer still holds such threads in
+    /// the old list while `startHats` looks in the new, empty one, so no hat finds them again.
+    pub stopped: bool,
     pub ctx: Box<ThreadCtx>,
     pub inner: Box<ThreadInner>,
     func: ScriptFn,
@@ -122,6 +125,7 @@ impl Thread {
             status: Status::Fresh,
             killed: false,
             stop_after_step: false,
+            stopped: false,
             ctx,
             inner,
             func,
@@ -223,6 +227,28 @@ impl ThreadInner {
             self.suspend(Yield::Loop);
             self.warp_started = Instant::now();
         }
+    }
+
+    pub fn in_warp(&self) -> bool {
+        self.warp_depth > 0
+    }
+
+    /// Pauses a thread whose block is not done yet, `how` saying why. A block that waits
+    /// ([`Yield::Wait`], scratch-vm's `STATUS_YIELD`) inside warp mode does not let other threads
+    /// run: scratch-vm runs it again at once until the warp timer runs out, and the thread stays
+    /// active. With `clock_moves` (a real clock, which moves while the block spins) this returns at
+    /// once while the warp time lasts, and the caller checks again. Otherwise spinning could change
+    /// nothing, so the thread suspends at once as if the warp time had run out.
+    pub fn pause(&mut self, how: Yield, clock_moves: bool) {
+        if how != Yield::Wait || self.warp_depth == 0 {
+            self.suspend(how);
+            return;
+        }
+        if clock_moves && self.warp_started.elapsed().as_millis() < WARP_TIME_MS {
+            return;
+        }
+        self.suspend(Yield::Loop);
+        self.warp_started = Instant::now();
     }
 
     pub fn enter_warp(&mut self) {
