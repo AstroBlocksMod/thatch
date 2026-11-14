@@ -111,28 +111,36 @@ fn parse_radix(digits: &str, radix: u32) -> f64 {
         return f64::NAN;
     }
     let bits_per_digit = radix.trailing_zeros();
-    let mut bits: Vec<bool> = Vec::with_capacity(digits.len() * bits_per_digit as usize);
+    // The bits from the first 1 on: how many there are, the first 53 of them, the one after those
+    // (the round bit), and whether any later one is set (the sticky bit). Nothing else is kept, so
+    // a huge literal costs no memory.
+    let mut count: u64 = 0;
+    let mut mantissa: u64 = 0;
+    let mut round = false;
+    let mut sticky = false;
     for c in digits.chars() {
         let Some(d) = c.to_digit(radix) else { return f64::NAN };
         for b in (0..bits_per_digit).rev() {
-            bits.push((d >> b) & 1 == 1);
+            let bit = (d >> b) & 1 == 1;
+            if count == 0 && !bit {
+                continue;
+            }
+            match count {
+                0..53 => mantissa = (mantissa << 1) | u64::from(bit),
+                53 => round = bit,
+                _ => sticky |= bit,
+            }
+            count += 1;
         }
     }
-    let first = match bits.iter().position(|b| *b) {
-        Some(i) => i,
-        None => return 0.0,
-    };
-    let bits = &bits[first..];
-    if bits.len() <= 53 {
-        return bits.iter().fold(0u64, |n, b| (n << 1) | u64::from(*b)) as f64;
+    if count <= 53 {
+        return mantissa as f64;
     }
-    let mut mantissa = bits[..53].iter().fold(0u64, |n, b| (n << 1) | u64::from(*b));
-    let round = bits[53];
-    let sticky = bits[54..].iter().any(|b| *b);
     if round && (sticky || mantissa & 1 == 1) {
         mantissa += 1;
     }
-    let exponent = (bits.len() - 53) as i32;
+    // Past 1100 bits the result is infinite whatever the exponent, so it needs no more range.
+    let exponent = (count - 53).min(1100) as i32;
     // Exact: the mantissa fits in 54 bits and scaling by a power of two only moves the exponent,
     // overflowing to infinity as JavaScript does.
     mantissa as f64 * 2f64.powi(exponent)
@@ -629,6 +637,9 @@ mod tests {
         assert_eq!(js_number("0x0"), 0.0);
         assert_eq!(js_number("0o17"), 15.0);
         assert_eq!(js_number(&format!("0x{}", "f".repeat(300))), f64::INFINITY);
+        assert_eq!(js_number(&format!("0x{}1", "0".repeat(1000))), 1.0);
+        assert_eq!(js_number(&format!("0b1{}", "0".repeat(1023))), 2f64.powi(1023));
+        assert_eq!(js_number(&format!("0b1{}", "0".repeat(1024))), f64::INFINITY);
     }
 
     #[test]

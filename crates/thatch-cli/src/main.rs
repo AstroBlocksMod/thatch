@@ -50,8 +50,22 @@ enum Cmd {
     Check { project: PathBuf },
 }
 
+/// The stack the compiler runs on. Lowering and code generation recurse once per nesting level, and
+/// a project may nest blocks up to `thatch_scratch::MAX_NESTING` deep, which needs more than the
+/// main thread's stack in a debug build. Only the pages actually used cost memory.
+const COMPILER_STACK: usize = 256 << 20;
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    std::thread::Builder::new()
+        .name("thatch".to_owned())
+        .stack_size(COMPILER_STACK)
+        .spawn(move || command(cli))?
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+fn command(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Cmd::Run { project, frames, timing, seed } => run(&project, RunOptions { frames, timing, seed }),
         Cmd::Build { project, output, object, runtime_lib } => build(&project, output, object, runtime_lib),

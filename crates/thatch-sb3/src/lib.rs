@@ -334,7 +334,9 @@ impl Project {
         let mut reader = std::io::BufReader::new(file);
         let head = reader.fill_buf().map_err(io)?;
         let json_start = head.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(head);
-        let is_json = json_start.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{');
+        // An archive starts with `PK`, so a first buffer of nothing but whitespace (or an empty
+        // file) can only be JSON, however much whitespace comes before the `{`.
+        let is_json = matches!(json_start.iter().find(|b| !b.is_ascii_whitespace()), Some(b'{') | None);
         if is_json {
             let text = read_limited(&mut reader, &display)?;
             return Self::from_json(text.trim_start_matches('\u{FEFF}'));
@@ -405,6 +407,10 @@ mod tests {
         std::fs::write(&path, "\u{FEFF}\n  {\"targets\":[{\"isStage\":true,\"name\":\"Stage\"}]}").unwrap();
         let project = Project::read(&path).unwrap();
         assert_eq!(project.targets[0].name, "Stage");
+        // More whitespace than the reader buffers at once.
+        let padded = format!("{}{{\"targets\":[{{\"isStage\":true,\"name\":\"Stage\"}}]}}", " ".repeat(100_000));
+        std::fs::write(&path, padded).unwrap();
+        assert_eq!(Project::read(&path).unwrap().targets[0].name, "Stage");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

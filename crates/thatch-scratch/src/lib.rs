@@ -16,12 +16,18 @@ use thatch_ir::{
 };
 use thatch_sb3::{Block, Input, Primitive, Project, field_id, field_value, parse_input};
 
+/// How deeply blocks may nest, counting C blocks and reporters inside inputs. Real projects stay far
+/// below this; generated ones with long arithmetic chains can reach a few hundred.
+pub const MAX_NESTING: usize = 1000;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("the project has no stage")]
     NoStage,
     #[error("{target}: block {block} is part of a cycle of blocks, which is not a valid script")]
     Cycle { target: String, block: String },
+    #[error("{target}: block {block} is nested more than {MAX_NESTING} blocks deep")]
+    TooDeep { target: String, block: String },
     #[error("{target}: custom block {proccode:?} has {ids} argument ids but {names} argument names")]
     ArgumentMetadata { target: String, proccode: String, ids: usize, names: usize },
 }
@@ -232,8 +238,14 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Marks a block as being lowered, or records a cycle when it already is.
+    /// Marks a block as being lowered, or records a cycle when it already is. `visiting` holds the
+    /// blocks being lowered from the hat down to this one, so its size is the nesting depth, which
+    /// is bounded so that a deeply nested project is an error and not a stack overflow.
     fn enter(&mut self, id: &str) -> bool {
+        if self.visiting.len() >= MAX_NESTING {
+            self.fail(Error::TooDeep { target: self.targets[self.target].name.clone(), block: id.to_owned() });
+            return false;
+        }
         if !self.visiting.insert(id.to_owned()) {
             self.fail(Error::Cycle { target: self.targets[self.target].name.clone(), block: id.to_owned() });
             return false;
@@ -865,5 +877,39 @@ mod tests {
         let lowered = lower(&p).unwrap();
         assert_eq!(lowered.warnings.len(), 1);
         assert!(lowered.warnings[0].message.contains("motion_movesteps"));
+    }
+
+    /// A chain of `+` reporters nested `depth` deep under a `say`.
+    fn nested_adds(depth: usize) -> Project {
+        let mut blocks = vec![
+            r#""h":{"opcode":"event_whenflagclicked","next":"s","parent":null,"inputs":{},"fields":{},"topLevel":true}"#
+                .to_owned(),
+            r#""s":{"opcode":"looks_say","next":null,"parent":"h","inputs":{"MESSAGE":[3,"a0",[10,""]]},"fields":{},"topLevel":false}"#
+                .to_owned(),
+        ];
+        for i in 0..depth {
+            let num1 = if i + 1 < depth { format!(r#"[3,"a{}",[4,""]]"#, i + 1) } else { r#"[1,[4,"1"]]"#.to_owned() };
+            blocks.push(format!(
+                r#""a{i}":{{"opcode":"operator_add","next":null,"parent":"s","inputs":{{"NUM1":{num1},"NUM2":[1,[4,"1"]]}},"fields":{{}},"topLevel":false}}"#
+            ));
+        }
+        project(&format!("{{{}}}", blocks.join(",")), "{}")
+    }
+
+    #[test]
+    fn deep_nesting_is_an_error_not_a_crash() {
+        // Lowering recurses once per level, which needs more than a test thread's stack in a debug
+        // build, so this runs on a stack as big as the one the `thatch` command gives the compiler.
+        std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn(|| {
+                // The hat and the `say` count too.
+                assert!(lower(&nested_adds(MAX_NESTING - 2)).is_ok());
+                let err = lower(&nested_adds(MAX_NESTING + 10)).unwrap_err();
+                assert!(matches!(err, Error::TooDeep { .. }), "{err}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }
