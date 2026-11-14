@@ -25,6 +25,7 @@ The headless host stays as the reference the samples check against, since Scratc
 - [x] Sprite state in the runtime (position, direction, size, costume, visibility, effects, layer) and the motion and looks blocks lowered against it, testable headless through the sensing reporters, with a callback that tells the host what to draw
 - [x] Input in the host table: keys, mouse, clicks, and the hats they start
 - [ ] Stage size and frame rate as values the runtime reports to hosts instead of constants in the ABI, before any host hard-codes 480 by 360 at 30 frames per second. The runtime uses the same values itself, for mouse clamping, random positions, fencing and the virtual clock, so a host and the runtime never disagree about the stage
+- [ ] `thatch build` writes the license texts a game has to ship next to the executable: Rust's standard library and every crate the runtime links, gathered when `libthatch_runtime.a` is built and kept beside it, with a test that fails when the list no longer matches the runtime's dependency tree. A host adds its own texts to the same file
 - [ ] The Scratch Everywhere! host in its own repository: submodule, hook patch and adapter, built with their JIT and DECtalk off (the JIT starts background threads, and DECtalk's license is unclear); Linux first, then macOS and Windows
 - [ ] `thatch build --host scratch-everywhere`: links the game against the shared library and writes the license notices next to it
 - [ ] Variables synced to Scratch Everywhere!'s copies so its monitors show them
