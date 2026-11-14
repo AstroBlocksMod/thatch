@@ -30,6 +30,8 @@ pub enum Error {
     TooDeep { target: String, block: String },
     #[error("{target}: custom block {proccode:?} has {ids} argument ids but {names} argument names")]
     ArgumentMetadata { target: String, proccode: String, ids: usize, names: usize },
+    #[error("could not start the thread the compiler runs on: {0}")]
+    Thread(#[source] std::io::Error),
 }
 
 /// Something the frontend could not translate faithfully.
@@ -59,18 +61,17 @@ pub struct Lowered {
 const LOWERING_STACK: usize = 256 << 20;
 
 /// Lowers a project to the IR. The work runs on a thread of its own with a large stack, so any
-/// caller can lower a project nested up to [`MAX_NESTING`] deep, whatever its own stack.
+/// caller can lower a project nested up to [`MAX_NESTING`] deep, whatever its own stack. When
+/// that thread cannot be started, this is [`Error::Thread`] rather than lowering on the caller's
+/// stack, which a deep project could overflow.
 pub fn lower(project: &Project) -> Result<Lowered, Error> {
     std::thread::scope(|scope| {
-        match std::thread::Builder::new()
+        let handle = std::thread::Builder::new()
             .name("thatch-lower".to_owned())
             .stack_size(LOWERING_STACK)
             .spawn_scoped(scope, || lower_here(project))
-        {
-            Ok(handle) => handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-            // Without a thread, lower on this one.
-            Err(_) => lower_here(project),
-        }
+            .map_err(Error::Thread)?;
+        handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))
     })
 }
 
