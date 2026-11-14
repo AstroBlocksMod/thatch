@@ -558,13 +558,13 @@ pub unsafe extern "C" fn thatch_random(ctx: *mut ThreadCtx, from: *const Value, 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn thatch_timer(ctx: *mut ThreadCtx) -> f64 {
     // SAFETY: as `thatch_temps_clear`.
-    unsafe { runtime(ctx).timer() }
+    unsafe { rt(ctx).timer() }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn thatch_reset_timer(ctx: *mut ThreadCtx) {
     // SAFETY: as `thatch_temps_clear`.
-    unsafe { runtime(ctx).reset_timer() }
+    unsafe { rt(ctx).reset_timer() }
 }
 
 // ---- control ----------------------------------------------------------------------------------
@@ -585,7 +585,7 @@ unsafe fn wait_until(ctx: *mut ThreadCtx, end_ms: f64) -> bool {
             if inner(ctx).killed() {
                 return false;
             }
-            if runtime(ctx).now_ms() >= end_ms {
+            if rt(ctx).now_ms() >= end_ms {
                 return true;
             }
         }
@@ -597,7 +597,7 @@ pub unsafe extern "C" fn thatch_wait(ctx: *mut ThreadCtx, secs: f64) {
     // SAFETY: as `thatch_temps_clear`.
     unsafe {
         let duration = (1000.0 * thatch_values::num_to_number(secs)).max(0.0);
-        let end = runtime(ctx).now_ms() + duration;
+        let end = rt(ctx).now_ms() + duration;
         runtime(ctx).request_redraw();
         wait_until(ctx, end);
     }
@@ -632,7 +632,7 @@ pub unsafe extern "C" fn thatch_say_for(ctx: *mut ThreadCtx, message: *const Val
         let target = inner(ctx).target;
         let token = rt(ctx).say(target, text, think != 0);
         let duration = (1000.0 * thatch_values::num_to_number(secs)).max(0.0);
-        let end = runtime(ctx).now_ms() + duration;
+        let end = rt(ctx).now_ms() + duration;
         if !wait_until(ctx, end) {
             return;
         }

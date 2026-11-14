@@ -21,8 +21,9 @@
 //!
 //! Host callbacks follow the same rule. A callback receives the runtime pointer and may call back
 //! in (the headless host asks for the target's name in `say`), so no reference to the runtime may
-//! be alive while one runs either. Everything that calls the host with the runtime pointer is a
-//! method of [`Rt`], which borrows the runtime only between callbacks.
+//! be alive while one runs either. The clock gets only the host's data, but a host may keep the
+//! runtime pointer there, so the same holds for it. Everything that calls the host is a method of
+//! [`Rt`], which borrows the runtime only between callbacks.
 
 use std::ffi::c_void;
 use std::ptr;
@@ -189,25 +190,6 @@ impl Runtime {
                 unsafe { VarSlot::replace(ptr::addr_of_mut!(*slot), crate::value::num(0.0)) };
             }
         }
-    }
-
-    // ---- clock --------------------------------------------------------------------------------
-
-    /// Milliseconds on the host's clock, or on the virtual clock when the host has none.
-    pub fn now_ms(&self) -> f64 {
-        match self.host.now_ms {
-            // SAFETY: the host gave this callback and its data for the runtime to call.
-            Some(now) => unsafe { now(self.host.data) },
-            None => self.frame as f64 * 1000.0 / FPS,
-        }
-    }
-
-    pub fn timer(&self) -> f64 {
-        (self.now_ms() - self.timer_start_ms) / 1000.0
-    }
-
-    pub fn reset_timer(&mut self) {
-        self.timer_start_ms = self.now_ms();
     }
 
     /// A uniform random number in `[0, 1)`, from a xorshift generator.
@@ -530,6 +512,29 @@ impl Rt {
         token
     }
 
+    /// Milliseconds on the host's clock, or on the virtual clock when the host has none. The clock
+    /// is a host callback, so it is read with no reference to the runtime alive.
+    pub fn now_ms(self) -> f64 {
+        let (now, data, frame) = self.with(|r| (r.host.now_ms, r.host.data, r.frame));
+        match now {
+            // SAFETY: the host gave this callback and its data for the runtime to call, and no
+            // reference to the runtime is alive, so the callback may call back in.
+            Some(now) => unsafe { now(data) },
+            None => frame as f64 * 1000.0 / FPS,
+        }
+    }
+
+    /// The `timer` reporter, in seconds.
+    pub fn timer(self) -> f64 {
+        let now = self.now_ms();
+        self.with(|r| (now - r.timer_start_ms) / 1000.0)
+    }
+
+    pub fn reset_timer(self) {
+        let now = self.now_ms();
+        self.with(|r| r.timer_start_ms = now);
+    }
+
     /// Stops every thread, as the stop sign or a `stop all` block does, and clears every bubble.
     pub fn stop_all(self) {
         for target in self.with(Runtime::kill_all) {
@@ -540,10 +545,8 @@ impl Rt {
     /// The green flag: everything stops first, as scratch-vm's `greenFlag` calls `stopAll`.
     pub fn start_flag(self) {
         self.stop_all();
-        self.with(|r| {
-            r.reset_timer();
-            r.start_hats(HAT_FLAG, "");
-        });
+        self.reset_timer();
+        self.with(|r| r.start_hats(HAT_FLAG, ""));
     }
 }
 

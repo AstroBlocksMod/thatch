@@ -41,7 +41,9 @@ typedef double (*ThatchNowFn)(void *data);
 
 /* What a host gives the runtime: data is passed back to every callback. A null callback means the
  * host does not care, except now_ms, where null selects the virtual clock of one frame per thirtieth
- * of a second that makes headless runs repeatable. */
+ * of a second that makes headless runs repeatable. A callback may ask the runtime about its state
+ * (thatch_runtime_target_name and the like), but must not run a frame, load, start or stop
+ * anything, or destroy the runtime. */
 typedef struct ThatchHost {
     void *data;
     ThatchSayFn say;

@@ -18,7 +18,13 @@ static void say(void *data, ThatchRuntime *rt, int64_t target, const char *text,
         return; /* the bubble was cleared */
     }
     name = thatch_runtime_target_name(rt, target, &name_len);
-    printf("%.*s %s: %.*s\n", (int)name_len, name ? name : "", think ? "thinks" : "says", (int)len, text);
+    /* Both are byte spans that may hold a NUL, so they are written by length, not with %s. */
+    if (name != NULL) {
+        fwrite(name, 1, name_len, stdout);
+    }
+    printf(" %s: ", think ? "thinks" : "says");
+    fwrite(text, 1, len, stdout);
+    putchar('\n');
 }
 
 int main(int argc, char **argv) {

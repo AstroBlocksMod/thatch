@@ -52,10 +52,9 @@ fn system_libs() -> &'static [&'static str] {
     }
 }
 
-fn temp_out_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("thatch-{tag}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
+/// A directory for build output, removed when the guard drops, also when an assertion fails.
+fn temp_out_dir(tag: &str) -> tempfile::TempDir {
+    tempfile::Builder::new().prefix(&format!("thatch-{tag}-")).tempdir().expect("temp dir")
 }
 
 fn check_output(name: &str, mode: &str, output: &std::process::Output) {
@@ -81,7 +80,7 @@ fn samples_build_to_executables() {
     let out_dir = temp_out_dir("samples");
     for name in sample_names() {
         let project = samples_dir().join(&name).join("project.json");
-        let exe = out_dir.join(&name);
+        let exe = out_dir.path().join(&name);
         let build = thatch()
             .arg("build")
             .arg(&project)
@@ -95,7 +94,6 @@ fn samples_build_to_executables() {
         let output = Command::new(&exe).arg("--frames").arg("3000").output().expect("the executable runs");
         check_output(&name, "build", &output);
     }
-    let _ = std::fs::remove_dir_all(&out_dir);
 }
 
 #[test]
@@ -106,8 +104,8 @@ fn samples_run_under_a_c_host() {
     let out_dir = temp_out_dir("c-host");
     for name in sample_names() {
         let project = samples_dir().join(&name).join("project.json");
-        let object = out_dir.join(format!("{name}.o"));
-        let exe = out_dir.join(&name);
+        let object = out_dir.path().join(format!("{name}.o"));
+        let exe = out_dir.path().join(&name);
         let build = thatch()
             .arg("build")
             .arg(&project)
@@ -141,5 +139,4 @@ fn samples_run_under_a_c_host() {
         let output = Command::new(&exe).arg("--frames").arg("3000").output().expect("the C host runs");
         check_output(&name, "c host", &output);
     }
-    let _ = std::fs::remove_dir_all(&out_dir);
 }

@@ -69,6 +69,8 @@ typedef struct ThatchHost {
 
 A null callback means the host does not care. Without `now_ms` the runtime uses a virtual clock of one frame per thirtieth of a second, which is what makes the headless host's runs repeatable; a windowed host passes its real clock.
 
+A callback may ask the runtime about its state, as the headless host asks for the target's name in `say`. `say` gets the runtime pointer for that, and a host that wants it in `now_ms` can keep it in `data`. A callback must not run a frame, load, start or stop anything, or destroy the runtime.
+
 Then it drives the runtime through the `thatch_runtime_*` functions:
 
 ```mermaid
