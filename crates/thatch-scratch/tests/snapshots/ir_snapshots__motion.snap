@@ -1,0 +1,136 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = ","
+str 1 = "-7.5"
+str 2 = "abc"
+str 3 = "Dog"
+str 4 = "Nobody"
+str 5 = "0.5"
+str 6 = "0.3"
+str 7 = "report"
+str 8 = "hello"
+str 9 = "x position of Cat: "
+str 10 = "x position"
+str 11 = "Cat"
+str 12 = "y position of Cat: "
+str 13 = "y position"
+str 14 = "direction of Cat: "
+str 15 = "direction"
+str 16 = "costume # of Cat: "
+str 17 = "costume #"
+str 18 = "costume name of Cat: "
+str 19 = "costume name"
+str 20 = "size of Cat: "
+str 21 = "size"
+str 22 = "volume of Cat: "
+str 23 = "volume"
+str 24 = "score of Cat: "
+str 25 = "score"
+str 26 = "word of Cat: "
+str 27 = "word"
+str 28 = "missing of Cat: "
+str 29 = "missing"
+str 30 = "x position of Nobody: "
+str 31 = "backdrop # of _stage_: "
+str 32 = "backdrop #"
+str 33 = "_stage_"
+str 34 = "backdrop name of _stage_: "
+str 35 = "backdrop name"
+str 36 = "volume of _stage_: "
+str 37 = "x position of _stage_: "
+str 38 = "direction of Dog: "
+str 39 = "size of Dog: "
+str 40 = "costume name of Dog: "
+str 41 = "Dog at "
+target "Stage" (stage)
+  backdrop 1 volume 100
+  costumes ["backdrop1", "night"]
+target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 60
+  costumes ["cat-a", "cat-b"]
+  num 0 "score" = 42
+  any 0 "word" = Str(StrId(8))
+  script FlagClicked -> fn 0
+target "Dog"
+  at (100, 50) direction -45 size 150 costume 2 AllAround volume 100
+  costumes ["dog-a", "dog-b", "dog-c"]
+  script BroadcastReceived("report") -> fn 1
+fn 0 "Cat/flag b1"()
+  GoToXY(10, 20)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  ChangeX(5)
+  ChangeY(-30)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  SetX(-7.5)
+  SetY(3)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  MoveSteps(10)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  Say((any)SpriteDirection())
+  Turn(90)
+  Say((any)SpriteDirection())
+  Turn(90)
+  Say((any)SpriteDirection())
+  Turn(Sub(0, 45))
+  Say((any)SpriteDirection())
+  PointInDirection(540)
+  Say((any)SpriteDirection())
+  PointInDirection(-180)
+  Say((any)SpriteDirection())
+  PointInDirection(181)
+  Say((any)SpriteDirection())
+  PointInDirection(0)
+  Say((any)SpriteDirection())
+  GoToXY(0, 0)
+  MoveSteps(10)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  PointInDirection(180)
+  MoveSteps(10)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  PointInDirection(-90)
+  MoveSteps(20)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  PointTowards(str 3)
+  Say((any)SpriteDirection())
+  PointTowards(str 4)
+  Say((any)SpriteDirection())
+  GoTo(str 3)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  GoTo(str 4)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  Glide(0.5, 0, 0)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  Glide(0, 50, 60)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  GlideTo(0.3, str 3)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  GlideTo(0.3, str 4)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  SetX(0)
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  SetRotationStyle(LeftRight)()
+  Bounce()
+  Say((any)Join((str)SpriteX(), Join(str 0, (str)SpriteY())))
+  Broadcast(str 7)
+fn 1 "Dog/receive report"()
+  Say((any)Join(str 9, (str)PropertyOf(str 10, str 11)))
+  Say((any)Join(str 12, (str)PropertyOf(str 13, str 11)))
+  Say((any)Join(str 14, (str)PropertyOf(str 15, str 11)))
+  Say((any)Join(str 16, (str)PropertyOf(str 17, str 11)))
+  Say((any)Join(str 18, (str)PropertyOf(str 19, str 11)))
+  Say((any)Join(str 20, (str)PropertyOf(str 21, str 11)))
+  Say((any)Join(str 22, (str)PropertyOf(str 23, str 11)))
+  Say((any)Join(str 24, (str)PropertyOf(str 25, str 11)))
+  Say((any)Join(str 26, (str)PropertyOf(str 27, str 11)))
+  Say((any)Join(str 28, (str)PropertyOf(str 29, str 11)))
+  Say((any)Join(str 30, (str)PropertyOf(str 10, str 4)))
+  Say((any)Join(str 31, (str)PropertyOf(str 32, str 33)))
+  Say((any)Join(str 34, (str)PropertyOf(str 35, str 33)))
+  Say((any)Join(str 36, (str)PropertyOf(str 23, str 33)))
+  Say((any)Join(str 37, (str)PropertyOf(str 10, str 33)))
+  Say((any)Join(str 38, (str)PropertyOf(str 15, str 3)))
+  Say((any)Join(str 39, (str)PropertyOf(str 21, str 3)))
+  Say((any)Join(str 40, (str)PropertyOf(str 19, str 3)))
+  Say((any)Join(str 41, Join((str)SpriteX(), Join(str 0, (str)SpriteY()))))

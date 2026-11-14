@@ -8,8 +8,12 @@ str 2 = "new"
 str 3 = "global new"
 str 4 = ""
 target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["backdrop1"]
   any 0 "g" = Str(StrId(0))
 target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
   any 0 "s" = Str(StrId(4))
   script FlagClicked -> fn 1
 fn 0 "Cat/show %s and %s"(a: any, b: any)

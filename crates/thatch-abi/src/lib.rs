@@ -25,7 +25,7 @@ use alloc::string::String;
 use core::ffi::c_void;
 use core::fmt::Write;
 
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 /// A dynamically typed Scratch value: a number, a string handle or a boolean.
 #[repr(C)]
@@ -66,6 +66,46 @@ pub struct ThreadCtx {
 pub const HAT_FLAG: i64 = 0;
 pub const HAT_BROADCAST: i64 = 1;
 
+/// Rotation styles, for `thatch_set_sprite`, `thatch_set_rotation_style` and [`Sprite`].
+pub const ROTATE_ALL_AROUND: i64 = 0;
+pub const ROTATE_LEFT_RIGHT: i64 = 1;
+pub const ROTATE_DONT_ROTATE: i64 = 2;
+
+/// The graphic effects, in the order of [`Sprite::effects`] and of the effect argument of
+/// `thatch_set_effect` and `thatch_change_effect`.
+pub const EFFECTS: &[&str] = &["color", "fisheye", "whirl", "pixelate", "mosaic", "brightness", "ghost"];
+pub const EFFECT_COUNT: usize = 7;
+
+/// The stage, in Scratch coordinates: x runs from -240 to 240, y from -180 to 180.
+pub const STAGE_WIDTH: f64 = 480.0;
+pub const STAGE_HEIGHT: f64 = 360.0;
+
+/// What a sprite looks like, for the host to draw. The stage has a costume (its backdrop) and
+/// effects; its other fields are fixed.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sprite {
+    pub x: f64,
+    pub y: f64,
+    /// -179 to 180, 90 pointing right, as Scratch shows it. The rotation style says how to draw it.
+    pub direction: f64,
+    /// Percent of the costume's size.
+    pub size: f64,
+    /// The index of the current costume, counted from 0.
+    pub costume: i64,
+    /// One of the `ROTATE_*` values.
+    pub rotation_style: i32,
+    pub visible: i8,
+    pub _reserved: [i8; 3],
+    /// The graphic effects, in the order of [`EFFECTS`].
+    pub effects: [f64; EFFECT_COUNT],
+}
+
+/// What `measure` asks a host for.
+pub const MEASURE_BOUNDS: i32 = 0;
+pub const MEASURE_BOX: i32 = 1;
+pub const MEASURE_COSTUME_SIZE: i32 = 2;
+
 /// Types in runtime function signatures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbiType {
@@ -105,6 +145,11 @@ rt_fns! {
     ADD_NUM_VAR = "thatch_add_num_var"(I64, I64, I64, I64, F64);
     ADD_ANY_VAR = "thatch_add_any_var"(I64, I64, I64, I64, I64, I64);
     ADD_SCRIPT = "thatch_add_script"(I64, I64, I64, I64, I64, I64);
+    // A costume of a target, by name, in costume order.
+    ADD_COSTUME = "thatch_add_costume"(I64, I64, I64, I64);
+    // A target's initial state: x, y, direction, size, costume index, visible, rotation style,
+    // draggable, volume.
+    SET_SPRITE = "thatch_set_sprite"(I64, I64, F64, F64, F64, F64, I64, I8, I64, I8, F64);
     // The headless host's entry point: argc, argv, init function, ABI version of the program.
     MAIN = "thatch_main"(I32, I64, I64, I32) -> I32;
 
@@ -153,6 +198,46 @@ rt_fns! {
     STOP_OTHERS = "thatch_stop_others"(I64);
     PROC_ENTER = "thatch_proc_enter"(I64, I64, I64, I8);
     PROC_EXIT = "thatch_proc_exit"(I64, I8);
+
+    // Motion. Names of other sprites (and "_mouse_" and "_random_") are string handles.
+    MOVE_STEPS = "thatch_move_steps"(I64, F64);
+    GO_TO_XY = "thatch_go_to_xy"(I64, F64, F64);
+    GO_TO = "thatch_go_to"(I64, I64);
+    SET_X = "thatch_set_x"(I64, F64);
+    SET_Y = "thatch_set_y"(I64, F64);
+    CHANGE_X = "thatch_change_x"(I64, F64);
+    CHANGE_Y = "thatch_change_y"(I64, F64);
+    TURN = "thatch_turn"(I64, F64);
+    POINT_IN_DIRECTION = "thatch_point_in_direction"(I64, F64);
+    POINT_TOWARDS = "thatch_point_towards"(I64, I64);
+    // Glides yield until the time is up.
+    GLIDE = "thatch_glide"(I64, F64, F64, F64);
+    GLIDE_TO = "thatch_glide_to"(I64, F64, I64);
+    BOUNCE = "thatch_bounce"(I64);
+    SET_ROTATION_STYLE = "thatch_set_rotation_style"(I64, I64);
+    SPRITE_X = "thatch_sprite_x"(I64) -> F64;
+    SPRITE_Y = "thatch_sprite_y"(I64) -> F64;
+    SPRITE_DIRECTION = "thatch_sprite_direction"(I64) -> F64;
+
+    // Looks. Costumes and backdrops are chosen by a dynamically typed value: a number is an index,
+    // a string a name first.
+    SET_VISIBLE = "thatch_set_visible"(I64, I8);
+    SWITCH_COSTUME = "thatch_switch_costume"(I64, I64);
+    NEXT_COSTUME = "thatch_next_costume"(I64);
+    SWITCH_BACKDROP = "thatch_switch_backdrop"(I64, I64);
+    NEXT_BACKDROP = "thatch_next_backdrop"(I64);
+    SET_SIZE = "thatch_set_size"(I64, F64);
+    CHANGE_SIZE = "thatch_change_size"(I64, F64);
+    SET_EFFECT = "thatch_set_effect"(I64, I64, F64);
+    CHANGE_EFFECT = "thatch_change_effect"(I64, I64, F64);
+    CLEAR_EFFECTS = "thatch_clear_effects"(I64);
+    GO_TO_LAYER = "thatch_go_to_layer"(I64, I8);
+    GO_LAYERS = "thatch_go_layers"(I64, F64);
+    SPRITE_SIZE = "thatch_sprite_size"(I64) -> F64;
+    COSTUME_NUMBER = "thatch_costume_number"(I64, I8) -> F64;
+    COSTUME_NAME = "thatch_costume_name"(I64, I8) -> I64;
+    // `property of object`: writes the value into the caller's slot.
+    PROPERTY_OF = "thatch_property_of"(I64, I64, I64, I64);
 }
 
 /// The symbol compiled programs export for the runtime to call.
@@ -191,17 +276,37 @@ pub type HostSayFn = unsafe extern "C" fn(
 /// The host's clock in milliseconds, which `wait` and `timer` read. Only differences matter.
 pub type HostNowFn = unsafe extern "C" fn(data: *mut c_void) -> f64;
 
+/// Called when something about how a target looks changed: position, direction, size, costume,
+/// visibility, effects or layer order. `thatch_runtime_sprite` has the new state.
+pub type HostSpriteChangedFn = unsafe extern "C" fn(data: *mut c_void, rt: *mut OpaqueRuntime, target: i64);
+
+/// Asks a host that draws about a sprite as it is drawn right now. `what` is `MEASURE_BOUNDS` (the
+/// tight bounds of the drawn sprite: left, right, bottom, top in Scratch coordinates), `MEASURE_BOX`
+/// (its axis-aligned bounding box, the same way) or `MEASURE_COSTUME_SIZE` (the current costume's
+/// width and height before scaling, in the first two values). Returns nonzero when `out` was filled.
+pub type HostMeasureFn =
+    unsafe extern "C" fn(data: *mut c_void, rt: *mut OpaqueRuntime, target: i64, what: i32, out: *mut f64) -> i8;
+
 /// What a host gives the runtime: a pointer passed back to every callback, and the callbacks. A
 /// null callback means the host does not care, except `now_ms`, where null selects the virtual
 /// clock of one frame per thirtieth of a second that makes headless runs repeatable. A callback may
 /// ask the runtime about its state (`thatch_runtime_target_name` and the like), but must not run a
 /// frame, load, start or stop anything, or destroy the runtime.
+///
+/// `sprite_changed` tells the runtime that the host draws: then a visible change to a sprite asks
+/// for a redraw, which ends the frame early, as scratch-vm does with a renderer. `measure` lets the
+/// runtime keep sprites fenced to the stage, bounce them off its edges and clamp their size, which
+/// all need to know how big a sprite is drawn; without it those do what scratch-vm does without a
+/// renderer, which is nothing. Callbacks may read the runtime back through the host API, but not
+/// change it.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Host {
     pub data: *mut c_void,
     pub say: Option<HostSayFn>,
     pub now_ms: Option<HostNowFn>,
+    pub sprite_changed: Option<HostSpriteChangedFn>,
+    pub measure: Option<HostMeasureFn>,
 }
 
 /// Result codes of `thatch_runtime_load`.
@@ -271,6 +376,16 @@ pub const HOST_API: &[CFn] = c_fns! {
     "const char *" "thatch_runtime_target_name"("const ThatchRuntime *" "rt", "int64_t" "target", "size_t *" "len");
     /// Whether a target is the stage.
     "int8_t" "thatch_runtime_target_is_stage"("const ThatchRuntime *" "rt", "int64_t" "target");
+    /// Fills in how a target looks right now. Returns 0 for an index out of range.
+    "int8_t" "thatch_runtime_sprite"("const ThatchRuntime *" "rt", "int64_t" "target", "ThatchSprite *" "out");
+    /// Writes the targets in drawing order, the stage first and the frontmost sprite last, into
+    /// `targets`, at most `cap` of them, and returns how many there are in all.
+    "size_t" "thatch_runtime_draw_order"("const ThatchRuntime *" "rt", "int64_t *" "targets", "size_t" "cap");
+    /// How many costumes a target has.
+    "int64_t" "thatch_runtime_costume_count"("const ThatchRuntime *" "rt", "int64_t" "target");
+    /// The name of a target's costume as UTF-8, `*len` bytes long, not NUL-terminated. Null for an
+    /// index out of range.
+    "const char *" "thatch_runtime_costume_name"("const ThatchRuntime *" "rt", "int64_t" "target", "int64_t" "costume", "size_t *" "len");
     /// The message of the last error, UTF-8 and `*len` bytes long, or null when there was none.
     "const char *" "thatch_runtime_last_error"("const ThatchRuntime *" "rt", "size_t *" "len");
     /// Stops every script, lets the suspended ones finish and frees the runtime.
@@ -318,6 +433,39 @@ int32_t thatch_program_abi_version(void);
 #define THATCH_LOAD_NO_STAGE {LOAD_NO_STAGE}
 #define THATCH_LOAD_ALREADY_LOADED {LOAD_ALREADY_LOADED}
 
+/* The stage, in Scratch coordinates: x runs from -240 to 240, y from -180 to 180. */
+#define THATCH_STAGE_WIDTH {STAGE_WIDTH}
+#define THATCH_STAGE_HEIGHT {STAGE_HEIGHT}
+
+/* Rotation styles. */
+#define THATCH_ROTATE_ALL_AROUND {ROTATE_ALL_AROUND}
+#define THATCH_ROTATE_LEFT_RIGHT {ROTATE_LEFT_RIGHT}
+#define THATCH_ROTATE_DONT_ROTATE {ROTATE_DONT_ROTATE}
+
+/* The graphic effects, as indices into ThatchSprite.effects. */
+#define THATCH_EFFECT_COLOR 0
+#define THATCH_EFFECT_FISHEYE 1
+#define THATCH_EFFECT_WHIRL 2
+#define THATCH_EFFECT_PIXELATE 3
+#define THATCH_EFFECT_MOSAIC 4
+#define THATCH_EFFECT_BRIGHTNESS 5
+#define THATCH_EFFECT_GHOST 6
+#define THATCH_EFFECT_COUNT {EFFECT_COUNT}
+
+/* What a target looks like, for the host to draw. The stage has a costume (its backdrop) and
+ * effects; its other fields are fixed. */
+typedef struct ThatchSprite {{
+    double x;
+    double y;
+    double direction;      /* -179 to 180, 90 pointing right; see rotation_style */
+    double size;           /* percent of the costume's size */
+    int64_t costume;       /* index of the current costume, from 0 */
+    int32_t rotation_style; /* a THATCH_ROTATE_* value */
+    int8_t visible;
+    int8_t reserved[3];
+    double effects[THATCH_EFFECT_COUNT];
+}} ThatchSprite;
+
 /* Called when a target says or thinks text: UTF-8, len bytes, not NUL-terminated, already cut and
  * formatted as scratch-vm shows it. Empty text clears the bubble. */
 typedef void (*ThatchSayFn)(void *data, ThatchRuntime *rt, int64_t target, const char *text, size_t len, int8_t think);
@@ -325,15 +473,36 @@ typedef void (*ThatchSayFn)(void *data, ThatchRuntime *rt, int64_t target, const
 /* The host's clock in milliseconds, read by wait and timer. Only differences matter. */
 typedef double (*ThatchNowFn)(void *data);
 
+/* Called when something about how a target looks changed: position, direction, size, costume,
+ * visibility, effects or layer order. thatch_runtime_sprite has the new state. */
+typedef void (*ThatchSpriteChangedFn)(void *data, ThatchRuntime *rt, int64_t target);
+
+/* What thatch_runtime asks a host that draws to measure. */
+#define THATCH_MEASURE_BOUNDS {MEASURE_BOUNDS}       /* tight bounds of the drawn sprite: left, right, bottom, top */
+#define THATCH_MEASURE_BOX {MEASURE_BOX}          /* its axis-aligned bounding box, the same way */
+#define THATCH_MEASURE_COSTUME_SIZE {MEASURE_COSTUME_SIZE} /* the current costume's unscaled width and height */
+
+/* Measures a sprite as it is drawn right now, in Scratch coordinates, into out (four values). Returns
+ * nonzero when out was filled. */
+typedef int8_t (*ThatchMeasureFn)(void *data, ThatchRuntime *rt, int64_t target, int32_t what, double *out);
+
 /* What a host gives the runtime: data is passed back to every callback. A null callback means the
  * host does not care, except now_ms, where null selects the virtual clock of one frame per thirtieth
- * of a second that makes headless runs repeatable. A callback may ask the runtime about its state
- * (thatch_runtime_target_name and the like), but must not run a frame, load, start or stop
- * anything, or destroy the runtime. */
+ * of a second that makes headless runs repeatable. Zero the struct before filling it in, so fields
+ * added later are null. A callback may ask the runtime about its state (thatch_runtime_target_name
+ * and the like), but must not run a frame, load, start or stop anything, or destroy the runtime.
+ *
+ * sprite_changed tells the runtime that the host draws: a visible change to a sprite then asks for a
+ * redraw, which ends the frame early, as scratch-vm does with a renderer. measure lets the runtime
+ * keep sprites on the stage, bounce them off its edges and clamp their size, which all need to know
+ * how big a sprite is drawn; without it those do what scratch-vm does without a renderer: nothing.
+ * Callbacks may read the runtime back through the functions below, but not change it. */
 typedef struct ThatchHost {{
     void *data;
     ThatchSayFn say;
     ThatchNowFn now_ms;
+    ThatchSpriteChangedFn sprite_changed;
+    ThatchMeasureFn measure;
 }} ThatchHost;
 
 /* A host creates a runtime, loads a program, starts the green flag and then runs a frame at a time,
@@ -391,6 +560,18 @@ mod tests {
             on_disk == generated,
             "include/thatch.h is out of date; run `THATCH_UPDATE_HEADER=1 cargo test -p thatch-abi` and commit it"
         );
+    }
+
+    #[test]
+    fn sprite_layout_matches_the_header() {
+        // The C struct in the header lists the same fields in the same order; this pins the layout
+        // that gives.
+        assert_eq!(core::mem::size_of::<Sprite>(), 48 + 8 * EFFECT_COUNT);
+        assert_eq!(core::mem::offset_of!(Sprite, costume), 32);
+        assert_eq!(core::mem::offset_of!(Sprite, rotation_style), 40);
+        assert_eq!(core::mem::offset_of!(Sprite, visible), 44);
+        assert_eq!(core::mem::offset_of!(Sprite, effects), 48);
+        assert_eq!(EFFECTS.len(), EFFECT_COUNT);
     }
 
     #[test]

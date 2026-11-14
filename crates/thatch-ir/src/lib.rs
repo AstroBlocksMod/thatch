@@ -94,6 +94,25 @@ pub enum RtExpr {
     Random,
     /// `timer`: -> Num.
     Timer,
+    /// The sprite's x position: -> Num. Values within a billionth of a whole number are rounded.
+    SpriteX,
+    /// The sprite's y position: -> Num, rounded the same way.
+    SpriteY,
+    /// The sprite's direction: -> Num.
+    SpriteDirection,
+    /// The sprite's size, rounded to a whole number: -> Num.
+    SpriteSize,
+    /// The number of the current costume, counted from 1: -> Num.
+    CostumeNumber,
+    /// The name of the current costume: -> Str.
+    CostumeName,
+    /// The number of the stage's current backdrop, counted from 1: -> Num.
+    BackdropNumber,
+    /// The name of the stage's current backdrop: -> Str.
+    BackdropName,
+    /// `property of object`: Str, Str -> Any. The property is a name such as "x position" or a
+    /// variable name; the object a sprite name or "_stage_".
+    PropertyOf,
 }
 
 /// Runtime commands.
@@ -119,6 +138,101 @@ pub enum RtStmt {
     StopOthers,
     /// `reset timer`.
     ResetTimer,
+
+    // Motion. A target name (Str) is a sprite's name, "_mouse_" or "_random_".
+    /// `move steps` (Num).
+    MoveSteps,
+    /// `go to x: y:` (Num, Num).
+    GoToXY,
+    /// `go to target` (Str).
+    GoTo,
+    /// `set x to` (Num).
+    SetX,
+    /// `set y to` (Num).
+    SetY,
+    /// `change x by` (Num).
+    ChangeX,
+    /// `change y by` (Num).
+    ChangeY,
+    /// `turn right degrees` (Num). Turning left is a turn by the negated amount.
+    Turn,
+    /// `point in direction` (Num).
+    PointInDirection,
+    /// `point towards target` (Str).
+    PointTowards,
+    /// `glide secs to x: y:` (Num, Num, Num). Yields until the time is up.
+    Glide,
+    /// `glide secs to target` (Num, Str). Yields until the time is up.
+    GlideTo,
+    /// `if on edge, bounce`.
+    Bounce,
+    /// `set rotation style` to the given [`RotationStyle`].
+    SetRotationStyle(RotationStyle),
+
+    // Looks.
+    /// `show`.
+    Show,
+    /// `hide`.
+    Hide,
+    /// `switch costume to` (Any): a number is a costume number, a string a costume name first.
+    SwitchCostume,
+    /// `next costume`.
+    NextCostume,
+    /// `switch backdrop to` (Any), on the stage, from any target.
+    SwitchBackdrop,
+    /// `next backdrop`.
+    NextBackdrop,
+    /// `set size to` (Num), in percent.
+    SetSize,
+    /// `change size by` (Num).
+    ChangeSize,
+    /// `set effect to` (Num), for the given effect.
+    SetEffect(Effect),
+    /// `change effect by` (Num).
+    ChangeEffect(Effect),
+    /// `clear graphic effects`.
+    ClearEffects,
+    /// `go to front layer` or, with `false`, `go to back layer`.
+    GoToLayer(bool),
+    /// `go forward layers` (Num). Going backward is going forward by the negated amount.
+    GoLayers,
+}
+
+/// How a sprite's direction shows when it is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RotationStyle {
+    AllAround,
+    LeftRight,
+    DontRotate,
+}
+
+/// The graphic effects, in the order the runtime and the ABI keep them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Effect {
+    Color,
+    Fisheye,
+    Whirl,
+    Pixelate,
+    Mosaic,
+    Brightness,
+    Ghost,
+}
+
+impl Effect {
+    pub const ALL: [Effect; 7] = [
+        Effect::Color,
+        Effect::Fisheye,
+        Effect::Whirl,
+        Effect::Pixelate,
+        Effect::Mosaic,
+        Effect::Brightness,
+        Effect::Ghost,
+    ];
+
+    /// The effect's position in [`Effect::ALL`], which is also its index in the ABI.
+    pub fn index(self) -> u8 {
+        Effect::ALL.iter().position(|e| *e == self).unwrap_or(0) as u8
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -216,6 +330,42 @@ pub struct AnyVar {
     pub initial: Const,
 }
 
+/// How a target starts out on the stage. For the stage itself only `costume` (the backdrop) and
+/// `volume` matter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpriteState {
+    pub x: f64,
+    pub y: f64,
+    /// -179 to 180, 90 pointing right.
+    pub direction: f64,
+    /// Percent of the costume's size.
+    pub size: f64,
+    /// The index of the current costume, counted from 0.
+    pub costume: u32,
+    pub visible: bool,
+    pub rotation_style: RotationStyle,
+    /// Whether the player may drag the sprite with the mouse.
+    pub draggable: bool,
+    /// Sound volume in percent, which `property of` reports.
+    pub volume: f64,
+}
+
+impl Default for SpriteState {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            direction: 90.0,
+            size: 100.0,
+            costume: 0,
+            visible: true,
+            rotation_style: RotationStyle::AllAround,
+            draggable: false,
+            volume: 100.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Target {
     pub name: String,
@@ -223,6 +373,10 @@ pub struct Target {
     pub num_vars: Vec<NumVar>,
     pub any_vars: Vec<AnyVar>,
     pub scripts: Vec<Script>,
+    /// The costume names, in costume order. Never empty: a target with no costumes gets one unnamed
+    /// costume, so that costume blocks have something to point at.
+    pub costumes: Vec<String>,
+    pub state: SpriteState,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -267,9 +421,18 @@ impl Expr {
                 BinOp::Lt | BinOp::Gt | BinOp::Eq | BinOp::And | BinOp::Or => Type::Bool,
             },
             Expr::Rt(f, _) => match f {
-                RtExpr::Join | RtExpr::LetterOf => Type::Str,
-                RtExpr::Length | RtExpr::Random | RtExpr::Timer => Type::Num,
+                RtExpr::Join | RtExpr::LetterOf | RtExpr::CostumeName | RtExpr::BackdropName => Type::Str,
+                RtExpr::Length
+                | RtExpr::Random
+                | RtExpr::Timer
+                | RtExpr::SpriteX
+                | RtExpr::SpriteY
+                | RtExpr::SpriteDirection
+                | RtExpr::SpriteSize
+                | RtExpr::CostumeNumber
+                | RtExpr::BackdropNumber => Type::Num,
                 RtExpr::Contains => Type::Bool,
+                RtExpr::PropertyOf => Type::Any,
             },
         }
     }
@@ -294,6 +457,24 @@ pub fn dump(program: &Program) -> String {
     }
     for t in &program.targets {
         out.push_str(&format!("target {:?}{}\n", t.name, if t.is_stage { " (stage)" } else { "" }));
+        let s = &t.state;
+        if t.is_stage {
+            out.push_str(&format!("  backdrop {} volume {}\n", s.costume, s.volume));
+        } else {
+            out.push_str(&format!(
+                "  at ({}, {}) direction {} size {} costume {}{} {:?}{} volume {}\n",
+                s.x,
+                s.y,
+                s.direction,
+                s.size,
+                s.costume,
+                if s.visible { "" } else { " hidden" },
+                s.rotation_style,
+                if s.draggable { " draggable" } else { "" },
+                s.volume
+            ));
+        }
+        out.push_str(&format!("  costumes {:?}\n", t.costumes));
         for (i, v) in t.num_vars.iter().enumerate() {
             out.push_str(&format!("  num {i} {:?} = {}\n", v.name, v.initial));
         }

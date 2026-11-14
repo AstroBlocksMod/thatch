@@ -827,6 +827,7 @@ dependencies = [
  "anyhow",
  "clap",
  "tempfile",
+ "thatch-abi",
  "thatch-codegen",
  "thatch-ir",
  "thatch-runtime",

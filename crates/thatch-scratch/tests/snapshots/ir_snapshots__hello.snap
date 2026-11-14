@@ -16,9 +16,13 @@ str 10 = "0.5"
 str 11 = "abc"
 str 12 = "ABC"
 target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["backdrop1"]
   num 0 "score" = 0
   any 0 "name" = Str(StrId(0))
 target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
   script FlagClicked -> fn 0
 fn 0 "Cat/flag flag"()
   set StageNum(0) = 0
