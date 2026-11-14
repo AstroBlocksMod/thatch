@@ -1,6 +1,6 @@
 # Thatch
 
-Thatch compiles Scratch projects to standalone native executables. It reads a standard `.sb3`, lowers the blocks to a typed intermediate representation, generates machine code with Cranelift and links the result against a small runtime. No browser, no JavaScript engine: a `forever` loop is a loop and a variable is a number in memory.
+Thatch is an optimizing compiler for Scratch projects. Today it builds standalone native executables: it reads a standard `.sb3`, lowers the blocks to a typed intermediate representation, generates machine code with Cranelift and links the result against a small runtime. No browser, no JavaScript engine: a `forever` loop is a loop and a variable is a number in memory. Backends plug in behind the IR, so a JIT and JVM and CLR backends are planned on the same runtime.
 
 ```sh
 cargo build --workspace --release
