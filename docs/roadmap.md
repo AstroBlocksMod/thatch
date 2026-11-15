@@ -24,17 +24,22 @@ The headless host stays as the reference the samples check against, since Scratc
 - [x] A host table in the ABI and a C header for hosts: a host creates the runtime with its callbacks (`say`, the clock), loads the program and steps frames; the headless host is its first implementation
 - [x] Sprite state in the runtime (position, direction, size, costume, visibility, effects, layer) and the motion and looks blocks lowered against it, testable headless through the sensing reporters, with a callback that tells the host what to draw
 - [x] Input in the host table: keys, mouse, clicks, and the hats they start
+- [ ] Stage size and frame rate as values the runtime reports to hosts instead of constants in the ABI, before any host hard-codes 480 by 360 at 30 frames per second. The runtime uses the same values itself, for mouse clamping, random positions, fencing and the virtual clock, so a host and the runtime never disagree about the stage
+- [ ] `thatch build` writes the license texts a game has to ship next to the executable: Rust's standard library and every crate the runtime links, gathered when `libthatch_runtime.a` is built and kept beside it, with a test that fails when the list no longer matches the runtime's dependency tree. A host adds its own texts to the same file
 - [ ] The Scratch Everywhere! host in its own repository: submodule, hook patch and adapter, built with their JIT and DECtalk off (the JIT starts background threads, and DECtalk's license is unclear); Linux first, then macOS and Windows
 - [ ] `thatch build --host scratch-everywhere`: links the game against the shared library and writes the license notices next to it
 - [ ] Variables synced to Scratch Everywhere!'s copies so its monitors show them
 - [ ] Pen
-- [ ] Key, mouse and click hats, and the sensing blocks that need a stage
+- [ ] The sensing blocks that need a stage: touching, touching color, distance to, ask, and dragging sprites (the host can already say that a release ended a drag; moving the sprite while it is dragged is what is missing)
 - [ ] Sound
+- [ ] A headed host of our own, in Rust on wgpu with no copyleft, that draws sprites and pen and is the reference for screenshot tests. It batches a frame's pen lines and stamps into a few draw calls, in order, which is where 3D projects that fill triangles with the pen spend their time. wgpu is MIT or Apache-2.0, so games built with it add its notices, and those of its dependencies, to the ones the runtime already needs
 
 ## Then: close the compatibility gaps
 
 - [ ] Lists, including the list blocks and list reporters in `join`
 - [ ] Clones: `create clone of`, `when I start as a clone`, `delete this clone`
+- [ ] Scratch's limits by default: at most 300 clones and 200,000 list items, as in scratch-vm
+- [ ] Raised limits on request: clone count, list size, stage size, frame rate, fencing and turbo mode, through `thatch` flags and through a project's TurboWarp settings comment (the JSON stage comment that ends in `// _twconfig_`). Thatch says which settings it applied, and a flag ignores the comment. Settings TurboWarp has no field for go in a `// _thatchconfig_` comment of the same shape. A comment comes with the project, so whoever runs it sets a ceiling: the settings a comment may raise, and how far, are capped by `thatch` flags and by the host, with defaults that keep a project from asking for more memory or frames than a normal game uses
 - [ ] The remaining hats: backdrop switches, timer and loudness hats
 - [ ] `answer`, `username`, `days since 2000`, `current` date and time
 - [ ] A conformance suite: run the Scratch Foundation's and TurboWarp's test projects through the scratch-vm oracle and compare
@@ -42,13 +47,38 @@ The headless host stays as the reference the samples check against, since Scratc
 
 ## Then: faster
 
+Speed may change how a value is computed, never which value comes out. Scratch numbers are 64-bit doubles, and add, subtract, multiply, divide and square root are exactly rounded, so doing the same operations on several list items at once in SIMD lanes gives the same bits. Summing a list in a different order does not, and neither do vectorized sine and cosine, so those stay scalar.
+
 - [ ] Benchmarks against scratch-vm and TurboWarp, run in CI
 - [ ] Type inference for strings and booleans, not only numbers
+- [ ] Numeric lists stored as plain doubles when type inference shows they only ever hold numbers
 - [ ] Inlining of small custom blocks and loop-invariant code motion in an optimizer crate over the IR
-- [ ] Cheaper yields: a per-frame budget check instead of a context switch when only one thread is active
+- [ ] Bounds checks of `item i of list` moved out of a loop once the range of `i` is known
+- [ ] Cheaper yields: a per-frame budget check instead of a context switch when only one thread is active, and a check without a runtime call at the end of loops in warp mode (which is inherited, and where the 500 ms limit still applies)
+- [ ] SIMD in the runtime for collision tests, `touching color`, list search and pen compositing
 - [ ] An LLVM backend behind the same backend trait, for release builds
+- [ ] Vectorized loops in the LLVM backend for work done on every item of a list, such as the vertex transforms of 3D engines, only where the result is bit-identical to running the items one by one
+
+## Then: more backends
+
+Thatch plugs in at both ends: a backend is anything that consumes the IR, and every backend's output calls the same Rust runtime through the C ABI and uses its scheduler. scratch-vm's timing rules then exist in one place, however a project is compiled. Ahead-of-time native executables are the first use of this, not the only one.
+
+- [ ] Resumable scripts: a language-neutral pass that turns each script, and each custom block that may yield, into a state machine whose values live across a pause in a frame object, for backends that cannot switch stacks. Custom blocks that never yield, and warp code, stay plain calls. The native backends switch to it only if benchmarks favor it over stackful threads
+- [ ] The runtime built as a shared library too, for backends whose output loads it at run time
+- [ ] A tiering JIT on Cranelift: compile every script quickly, then recompile the hot ones with the types seen at run time, behind guards that fall back when a type changes
+- [ ] A serialized IR format with a version number and a compatibility rule like the ABI's, so a backend can be written in any language and live outside the compiler. A test checks that every such backend reads the IR of every sample
+- [ ] A JVM backend: an emitter in Kotlin on ASM, starting from jScratch's code generator once it is relicensed, writing class files that call the runtime through the Foreign Function and Memory API (Java 22 or newer)
+- [ ] A CLR backend: an emitter in C# on .NET's `PersistedAssemblyBuilder` (.NET 9 or newer), writing assemblies that call the runtime through P/Invoke and give the scheduler `UnmanagedCallersOnly` entry points to resume
+
+The managed emitters are written in their platform's own language because that is where the mature tools are. The Rust crates for writing class files and .NET assemblies are young and mostly the work of one person each, and the .NET one is GPL-3.0, which the compiler cannot link.
 
 ## Then: beyond Scratch
 
 - [ ] The superset: custom blocks with return values, static type annotations, compile-time macros and FFI into the host, stored so the Scratch editor still loads the project
+- [ ] Macro extensions that expand into standard Scratch blocks, so a project stays portable to Scratch, TurboWarp and goboscript. Each expansion carries a block comment naming its macro, so tools can fold it back. Thatch recognizes the expansions and lowers them onto fast paths that give exactly the result the blocks would, and an expansion someone edited in the Scratch editor takes the general path
 - [ ] A Snap! frontend: closures, anonymous functions and nested lists on the same IR and runtime
+
+## Not planned
+
+- GPU compute for a project's own math. 3D projects do their math on the CPU and draw on the GPU, and that split stays: the math gets faster through the items above, the drawing through the wgpu host. Shaders would compute in 32-bit floats, since 64-bit floats are optional in wgpu and missing on Metal, which changes results that feed comparisons such as depth sorting; and the lists in real projects are small enough that copying them to the GPU each frame costs more than it saves.
+- NPU backends such as ONNX Runtime, unless a real project needs one.
