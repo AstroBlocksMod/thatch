@@ -13,6 +13,7 @@ nav = [
   { "Architecture" = "architecture.md" },
   { "The IR" = "ir.md" },
   { "The C ABI" = "abi.md" },
+  { "Language features" = "language-features.md" },
   { "Roadmap" = "roadmap.md" },
 ]
 

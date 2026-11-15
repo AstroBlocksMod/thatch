@@ -74,7 +74,7 @@ The managed emitters are written in their platform's own language because that i
 
 ## Then: beyond Scratch
 
-- [ ] The superset: custom blocks with return values, static type annotations, compile-time macros and FFI into the host, stored so the Scratch editor still loads the project
+- [ ] The superset: custom blocks with return values, static type annotations, compile-time macros and FFI into the host, stored so the Scratch editor still loads the project (draft design in [Language features](language-features.md))
 - [ ] Macro extensions that expand into standard Scratch blocks, so a project stays portable to Scratch, TurboWarp and goboscript. Each expansion carries a block comment naming its macro, so tools can fold it back. Thatch recognizes the expansions and lowers them onto fast paths that give exactly the result the blocks would, and an expansion someone edited in the Scratch editor takes the general path
 - [ ] A Snap! frontend: closures, anonymous functions and nested lists on the same IR and runtime
 
