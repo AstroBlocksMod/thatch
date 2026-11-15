@@ -14,5 +14,7 @@ itself, not against what Thatch happened to print. `thatch run samples/<name>/pr
 - `warp`: warp-mode loops that spin until another script changes a variable, and a stop all that ends a warp loop that never finishes.
 - `timing`: waits, wait until and the timer, tested by the order of events.
 - `numbers`: NaN handling, hexadecimal and exponent literals, and the hidden while block.
+- `motion`: moving, turning and pointing, direction wrapping, going and gliding to points and sprites, and what `of` reports about another sprite and the stage.
+- `looks`: costumes and backdrops by number, name and keyword, size, effects, show and hide, and the layer blocks, whose effect shows in the order sprites answer a broadcast.
 
 `crates/thatch-scratch/tests/snapshots/` holds the IR each sample lowers to.

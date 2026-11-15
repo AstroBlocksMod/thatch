@@ -15,12 +15,20 @@ str 9 = "B done"
 str 10 = "B got again"
 str 11 = "C got go"
 target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["backdrop1"]
 target "A"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
   script FlagClicked -> fn 0
 target "B"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
   script BroadcastReceived("go") -> fn 1
   script BroadcastReceived("again") -> fn 2
 target "C"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
   script BroadcastReceived("go") -> fn 3
 fn 0 "A/flag flag"()
   Say((any)str 0)

@@ -22,8 +22,19 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{DataDescription, DataId, FuncId as CFuncId, Linkage, Module, default_libcall_names};
 use cranelift_object::{ObjectBuilder, ObjectModule};
-use thatch_abi::{AbiType, HAT_BROADCAST, HAT_FLAG, TAG_BOOL, TAG_NUM, TAG_STR, ThreadCtx};
-use thatch_ir::{BinOp, Const, Expr, FuncId, Hat, Program, RtExpr, RtStmt, Stmt, Type, UnOp, VarRef};
+use thatch_abi::{
+    AbiType, HAT_BROADCAST, HAT_FLAG, ROTATE_ALL_AROUND, ROTATE_DONT_ROTATE, ROTATE_LEFT_RIGHT, TAG_BOOL, TAG_NUM,
+    TAG_STR, ThreadCtx,
+};
+use thatch_ir::{BinOp, Const, Expr, FuncId, Hat, Program, RotationStyle, RtExpr, RtStmt, Stmt, Type, UnOp, VarRef};
+
+fn rotation_style_id(style: RotationStyle) -> i64 {
+    match style {
+        RotationStyle::AllAround => ROTATE_ALL_AROUND,
+        RotationStyle::LeftRight => ROTATE_LEFT_RIGHT,
+        RotationStyle::DontRotate => ROTATE_DONT_ROTATE,
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -246,9 +257,15 @@ impl<'a, M: Module> Compiler<'a, M> {
             nums: Vec<((DataId, usize), f64)>,
             anys: Vec<((DataId, usize), u64, u64)>,
             scripts: Vec<(i64, (DataId, usize), CFuncId)>,
+            costumes: Vec<(DataId, usize)>,
+            state: thatch_ir::SpriteState,
         }
         let mut targets = Vec::new();
         for t in &self.program.targets {
+            let mut costumes = Vec::new();
+            for c in &t.costumes {
+                costumes.push((self.data(c)?, c.len()));
+            }
             let mut nums = Vec::new();
             for v in &t.num_vars {
                 nums.push(((self.data(&v.name)?, v.name.len()), v.initial));
@@ -276,6 +293,8 @@ impl<'a, M: Module> Compiler<'a, M> {
                 nums,
                 anys,
                 scripts,
+                costumes,
+                state: t.state.clone(),
             });
         }
 
@@ -306,6 +325,25 @@ impl<'a, M: Module> Compiler<'a, M> {
                 let is_stage = b.ins().iconst(types::I8, i64::from(t.is_stage));
                 let call = b.ins().call(f, &[rt, p, l, is_stage]);
                 let target = b.inst_results(call)[0];
+                for name in t.costumes {
+                    let f = rt_ref(&mut b, self.module, thatch_abi::ADD_COSTUME);
+                    let (p, l) = addr(&mut b, self.module, name);
+                    b.ins().call(f, &[rt, target, p, l]);
+                }
+                {
+                    let s = &t.state;
+                    let f = rt_ref(&mut b, self.module, thatch_abi::SET_SPRITE);
+                    let x = b.ins().f64const(s.x);
+                    let y = b.ins().f64const(s.y);
+                    let direction = b.ins().f64const(s.direction);
+                    let size = b.ins().f64const(s.size);
+                    let costume = b.ins().iconst(types::I64, i64::from(s.costume));
+                    let visible = b.ins().iconst(types::I8, i64::from(s.visible));
+                    let style = b.ins().iconst(types::I64, rotation_style_id(s.rotation_style));
+                    let draggable = b.ins().iconst(types::I8, i64::from(s.draggable));
+                    let volume = b.ins().f64const(s.volume);
+                    b.ins().call(f, &[rt, target, x, y, direction, size, costume, visible, style, draggable, volume]);
+                }
                 for (name, initial) in t.nums {
                     let f = rt_ref(&mut b, self.module, thatch_abi::ADD_NUM_VAR);
                     let (p, l) = addr(&mut b, self.module, name);
@@ -754,6 +792,28 @@ impl<'a, 'b, M: Module> FnGen<'a, 'b, M> {
                 self.rt_value(thatch_abi::RANDOM, &[self.ctx, a, b])
             }
             RtExpr::Timer => self.rt_value(thatch_abi::TIMER, &[self.ctx]),
+            RtExpr::SpriteX => self.rt_value(thatch_abi::SPRITE_X, &[self.ctx]),
+            RtExpr::SpriteY => self.rt_value(thatch_abi::SPRITE_Y, &[self.ctx]),
+            RtExpr::SpriteDirection => self.rt_value(thatch_abi::SPRITE_DIRECTION, &[self.ctx]),
+            RtExpr::SpriteSize => self.rt_value(thatch_abi::SPRITE_SIZE, &[self.ctx]),
+            RtExpr::CostumeNumber | RtExpr::BackdropNumber => {
+                let backdrop = self.b.ins().iconst(types::I8, i64::from(f == RtExpr::BackdropNumber));
+                self.rt_value(thatch_abi::COSTUME_NUMBER, &[self.ctx, backdrop])
+            }
+            RtExpr::CostumeName | RtExpr::BackdropName => {
+                let backdrop = self.b.ins().iconst(types::I8, i64::from(f == RtExpr::BackdropName));
+                self.temps = true;
+                self.rt_value(thatch_abi::COSTUME_NAME, &[self.ctx, backdrop])
+            }
+            RtExpr::PropertyOf => {
+                let property = self.string(&args[0]);
+                let object = self.string(&args[1]);
+                let slot = self.value_slot();
+                // The value may be a string the runtime keeps alive for the statement.
+                self.temps = true;
+                self.call_rt(thatch_abi::PROPERTY_OF, &[self.ctx, slot, property, object]);
+                slot
+            }
         }
     }
 
@@ -939,6 +999,103 @@ impl<'a, 'b, M: Module> FnGen<'a, 'b, M> {
             }
             RtStmt::ResetTimer => {
                 self.call_rt(thatch_abi::RESET_TIMER, &[self.ctx]);
+            }
+
+            // Motion and looks with one number.
+            RtStmt::MoveSteps
+            | RtStmt::SetX
+            | RtStmt::SetY
+            | RtStmt::ChangeX
+            | RtStmt::ChangeY
+            | RtStmt::Turn
+            | RtStmt::PointInDirection
+            | RtStmt::SetSize
+            | RtStmt::ChangeSize
+            | RtStmt::GoLayers => {
+                let name = match f {
+                    RtStmt::MoveSteps => thatch_abi::MOVE_STEPS,
+                    RtStmt::SetX => thatch_abi::SET_X,
+                    RtStmt::SetY => thatch_abi::SET_Y,
+                    RtStmt::ChangeX => thatch_abi::CHANGE_X,
+                    RtStmt::ChangeY => thatch_abi::CHANGE_Y,
+                    RtStmt::Turn => thatch_abi::TURN,
+                    RtStmt::PointInDirection => thatch_abi::POINT_IN_DIRECTION,
+                    RtStmt::SetSize => thatch_abi::SET_SIZE,
+                    RtStmt::ChangeSize => thatch_abi::CHANGE_SIZE,
+                    _ => thatch_abi::GO_LAYERS,
+                };
+                let v = self.num(&args[0]);
+                self.clear_temps();
+                self.call_rt(name, &[self.ctx, v]);
+            }
+            RtStmt::GoToXY => {
+                let x = self.num(&args[0]);
+                let y = self.num(&args[1]);
+                self.clear_temps();
+                self.call_rt(thatch_abi::GO_TO_XY, &[self.ctx, x, y]);
+            }
+            // Motion with a target name.
+            RtStmt::GoTo | RtStmt::PointTowards => {
+                let name = if f == RtStmt::GoTo { thatch_abi::GO_TO } else { thatch_abi::POINT_TOWARDS };
+                let target = self.string(&args[0]);
+                self.call_rt(name, &[self.ctx, target]);
+                self.clear_temps();
+            }
+            RtStmt::Glide => {
+                let secs = self.num(&args[0]);
+                let x = self.num(&args[1]);
+                let y = self.num(&args[2]);
+                self.clear_temps();
+                self.call_rt(thatch_abi::GLIDE, &[self.ctx, secs, x, y]);
+                self.check_killed();
+            }
+            RtStmt::GlideTo => {
+                let secs = self.num(&args[0]);
+                let target = self.string(&args[1]);
+                self.call_rt(thatch_abi::GLIDE_TO, &[self.ctx, secs, target]);
+                self.clear_temps();
+                self.check_killed();
+            }
+            RtStmt::Bounce => {
+                self.call_rt(thatch_abi::BOUNCE, &[self.ctx]);
+            }
+            RtStmt::SetRotationStyle(style) => {
+                let style = self.b.ins().iconst(types::I64, rotation_style_id(style));
+                self.call_rt(thatch_abi::SET_ROTATION_STYLE, &[self.ctx, style]);
+            }
+
+            // Looks.
+            RtStmt::Show | RtStmt::Hide => {
+                let visible = self.b.ins().iconst(types::I8, i64::from(f == RtStmt::Show));
+                self.call_rt(thatch_abi::SET_VISIBLE, &[self.ctx, visible]);
+            }
+            RtStmt::SwitchCostume | RtStmt::SwitchBackdrop => {
+                let name =
+                    if f == RtStmt::SwitchCostume { thatch_abi::SWITCH_COSTUME } else { thatch_abi::SWITCH_BACKDROP };
+                let v = self.any(&args[0]);
+                self.call_rt(name, &[self.ctx, v]);
+                self.clear_temps();
+            }
+            RtStmt::NextCostume => {
+                self.call_rt(thatch_abi::NEXT_COSTUME, &[self.ctx]);
+            }
+            RtStmt::NextBackdrop => {
+                self.call_rt(thatch_abi::NEXT_BACKDROP, &[self.ctx]);
+            }
+            RtStmt::SetEffect(effect) | RtStmt::ChangeEffect(effect) => {
+                let name =
+                    if matches!(f, RtStmt::SetEffect(_)) { thatch_abi::SET_EFFECT } else { thatch_abi::CHANGE_EFFECT };
+                let v = self.num(&args[0]);
+                self.clear_temps();
+                let effect = self.b.ins().iconst(types::I64, i64::from(effect.index()));
+                self.call_rt(name, &[self.ctx, effect, v]);
+            }
+            RtStmt::ClearEffects => {
+                self.call_rt(thatch_abi::CLEAR_EFFECTS, &[self.ctx]);
+            }
+            RtStmt::GoToLayer(front) => {
+                let front = self.b.ins().iconst(types::I8, i64::from(front));
+                self.call_rt(thatch_abi::GO_TO_LAYER, &[self.ctx, front]);
             }
         }
     }

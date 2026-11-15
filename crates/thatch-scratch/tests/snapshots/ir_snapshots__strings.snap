@@ -14,10 +14,14 @@ str 8 = "!"
 str 9 = "héllo"
 str 10 = "-2.5"
 target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["backdrop1"]
   num 0 "n" = 0
   num 1 "m" = 0
   any 0 "s" = Str(StrId(0))
 target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
   script FlagClicked -> fn 0
 fn 0 "Cat/flag flag"()
   set StageAny(0) = str 1

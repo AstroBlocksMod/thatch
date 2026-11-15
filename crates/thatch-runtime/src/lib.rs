@@ -12,11 +12,14 @@
 //!
 //! A host other than the headless one (a window, or Scratch Everywhere!) uses the `thatch_runtime_*`
 //! functions in [`api`] through the C header in `thatch-abi`: it creates a runtime with its own
-//! `thatch_abi::Host` table, loads the program and steps frames.
+//! `thatch_abi::Host` table, loads the program and steps frames. The runtime keeps every sprite's
+//! position, direction, size, costume, visibility, effects and layer (see [`sprite`]) and tells the
+//! host when they change; the host draws.
 
-mod api;
+pub mod api;
 mod host;
 mod scheduler;
+mod sprite;
 mod strings;
 mod thread;
 mod value;

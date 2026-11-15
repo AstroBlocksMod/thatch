@@ -33,6 +33,10 @@ pub enum Yield {
     /// The end of a loop iteration: the thread is still active and may be stepped again in this
     /// frame.
     Loop,
+    /// Waiting for something, such as a timer or other threads (scratch-vm's `STATUS_YIELD`): the
+    /// thread is stepped again in every pass of the frame that other active threads keep going,
+    /// but does not keep the frame going itself.
+    Wait,
     /// Waiting for the next frame.
     Tick,
 }
@@ -43,6 +47,8 @@ pub enum Status {
     Fresh,
     /// Stepped in this frame and still active.
     Running,
+    /// Stepped in this frame and waiting (see [`Yield::Wait`]).
+    Waiting,
     /// Waiting for the next frame.
     TickYield,
     Done,

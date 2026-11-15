@@ -9,7 +9,11 @@ str 3 = "]"
 str 4 = "0x200000000000011"
 str 5 = "1e-7"
 target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["backdrop1"]
 target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
   num 0 "v" = 0
   num 1 "i" = 0
   script FlagClicked -> fn 0

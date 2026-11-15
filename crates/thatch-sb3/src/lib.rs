@@ -80,8 +80,47 @@ pub struct Target {
     pub sounds: Vec<Value>,
     #[serde(default)]
     pub layer_order: i64,
+    /// Sound volume in percent.
+    #[serde(default = "default_volume")]
+    pub volume: f64,
+    // The fields below are those of a sprite; the stage leaves them out.
+    #[serde(default)]
+    pub x: f64,
+    #[serde(default)]
+    pub y: f64,
+    #[serde(default = "default_direction")]
+    pub direction: f64,
+    #[serde(default = "default_size")]
+    pub size: f64,
+    #[serde(default = "default_true")]
+    pub visible: bool,
+    #[serde(default)]
+    pub draggable: bool,
+    /// `"all around"`, `"left-right"` or `"don't rotate"`.
+    #[serde(default = "default_rotation_style")]
+    pub rotation_style: String,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+fn default_volume() -> f64 {
+    100.0
+}
+
+fn default_direction() -> f64 {
+    90.0
+}
+
+fn default_size() -> f64 {
+    100.0
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_rotation_style() -> String {
+    "all around".to_owned()
 }
 
 /// A block, as opposed to a top-level primitive (a variable or list reporter that sits on its own,
@@ -301,6 +340,11 @@ impl Target {
     pub fn broadcast_names(&self) -> BTreeMap<String, String> {
         self.broadcasts.iter().map(|(id, v)| (id.clone(), json_to_text(v))).collect()
     }
+
+    /// The costume names, in costume order. A costume without a name gets an empty one.
+    pub fn costume_names(&self) -> Vec<String> {
+        self.costumes.iter().map(|c| c.get("name").map(json_to_text).unwrap_or_default()).collect()
+    }
 }
 
 /// The most a `project.json` may be, inside an archive or on its own. Real projects stay far below;
@@ -390,6 +434,26 @@ mod tests {
         assert_eq!(stage.all_blocks().len(), 1);
         assert_eq!(stage.variable_list()[0].name, "score");
         assert!(!stage.variable_list()[0].cloud);
+        assert_eq!(stage.direction, 90.0);
+        assert_eq!(stage.size, 100.0);
+        assert!(stage.visible);
+        assert_eq!(stage.rotation_style, "all around");
+        assert!(stage.costume_names().is_empty());
+    }
+
+    #[test]
+    fn sprite_fields_and_costumes_are_read() {
+        let json = r#"{"targets":[{"isStage":true,"name":"Stage"},{"isStage":false,"name":"Cat",
+            "x":10,"y":-20.5,"direction":45,"size":50,"visible":false,"draggable":true,"rotationStyle":"left-right",
+            "currentCostume":1,"costumes":[{"name":"a"},{"name":"b"},{}]}]}"#;
+        let project = Project::from_json(json).unwrap();
+        let cat = &project.targets[1];
+        assert_eq!((cat.x, cat.y, cat.direction, cat.size), (10.0, -20.5, 45.0, 50.0));
+        assert!(!cat.visible);
+        assert!(cat.draggable);
+        assert_eq!(cat.rotation_style, "left-right");
+        assert_eq!(cat.current_costume, 1);
+        assert_eq!(cat.costume_names(), ["a", "b", ""]);
     }
 
     #[test]

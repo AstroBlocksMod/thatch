@@ -77,7 +77,15 @@ pub fn run(init: InitFn, abi_version: u32, options: &RunOptions) -> Result<RunRe
             .unwrap_or(0x9E37_79B9_7F4A_7C15)
     });
     let mut headless = Headless { says: 0 };
-    let host = Host { data: ptr::addr_of_mut!(headless).cast::<c_void>(), say: Some(headless_say), now_ms: None };
+    // No `sprite_changed` and no `measure`: like scratch-vm without a renderer, which is what the
+    // oracle behind the samples runs, nothing is fenced and motion requests no redraw.
+    let host = Host {
+        data: ptr::addr_of_mut!(headless).cast::<c_void>(),
+        say: Some(headless_say),
+        now_ms: None,
+        sprite_changed: None,
+        measure: None,
+    };
     // SAFETY: `host` outlives the runtime, which is created and destroyed here, and the runtime is
     // only touched between frames through the C API.
     unsafe {

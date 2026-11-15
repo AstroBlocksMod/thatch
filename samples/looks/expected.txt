@@ -1,0 +1,41 @@
+Cat says: 1 costume1
+Cat says: 2 costume2
+Cat says: 1 costume1
+Cat says: 3 3
+Cat says: 2 costume2
+Cat says: 1 costume1
+Cat says: 2 costume2
+Cat says: 1 costume1
+Cat says: 1 costume1
+Cat says: 1 costume1
+Cat says: 3 3
+Cat says: 2 costume2
+Cat says: 1 costume1
+Cat says: 2 costume2
+Cat says: 1 backdrop1
+Cat says: 2 blue
+Cat says: 3 backdrop3
+Cat says: 1 backdrop1
+Cat says: 3 backdrop3
+Cat says: 1 backdrop1
+Cat says: 3 backdrop3
+Cat says: 100
+Cat says: done
+C says: C
+B says: B
+A says: A
+A says: A
+C says: C
+B says: B
+A says: A
+B says: B
+C says: C
+A says: A
+B says: B
+C says: C
+B says: B
+A says: A
+C says: C
+A says: A
+C says: C
+B says: B

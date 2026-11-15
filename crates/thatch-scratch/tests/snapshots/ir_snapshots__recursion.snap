@@ -6,7 +6,11 @@ str 0 = "A after six deep"
 str 1 = "A after five deep"
 str 2 = "B "
 target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["backdrop1"]
 target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
   num 0 "i" = 0
   script FlagClicked -> fn 2
   script FlagClicked -> fn 3

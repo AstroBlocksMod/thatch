@@ -1,0 +1,132 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = "ping"
+str 1 = "afront"
+str 2 = "bforward"
+str 3 = "cback"
+str 4 = "aback"
+str 5 = "bfar"
+str 6 = " "
+str 7 = "3"
+str 8 = "previous costume"
+str 9 = "next costume"
+str 10 = ""
+str 11 = "1"
+str 12 = "nope"
+str 13 = "  "
+str 14 = "1.5"
+str 15 = "blue"
+str 16 = "previous backdrop"
+str 17 = "backdrop1"
+str 18 = "50.4"
+str 19 = "0.2"
+str 20 = "done"
+str 21 = "A"
+str 22 = "B"
+str 23 = "C"
+target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["backdrop1", "blue", "backdrop3"]
+  script FlagClicked -> fn 0
+target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1", "costume2", "3"]
+  script FlagClicked -> fn 1
+target "A"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
+  script BroadcastReceived("ping") -> fn 2
+  script BroadcastReceived("afront") -> fn 3
+  script BroadcastReceived("aback") -> fn 4
+target "B"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
+  script BroadcastReceived("ping") -> fn 5
+  script BroadcastReceived("bforward") -> fn 6
+  script BroadcastReceived("bfar") -> fn 7
+target "C"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
+  script BroadcastReceived("ping") -> fn 8
+  script BroadcastReceived("cback") -> fn 9
+fn 0 "Stage/flag b1"()
+  BroadcastAndWait(str 0)
+  BroadcastAndWait(str 1)
+  BroadcastAndWait(str 0)
+  BroadcastAndWait(str 2)
+  BroadcastAndWait(str 0)
+  BroadcastAndWait(str 3)
+  BroadcastAndWait(str 0)
+  BroadcastAndWait(str 4)
+  BroadcastAndWait(str 0)
+  BroadcastAndWait(str 5)
+  BroadcastAndWait(str 0)
+fn 1 "Cat/flag b13"()
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  NextCostume()
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  NextCostume()
+  NextCostume()
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)str 7)
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)Add(1, 1))
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)str 8)
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)str 9)
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)Join(str 10, str 11))
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)str 12)
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)str 13)
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)0)
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)str 14)
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)Lt(1, 2))
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  SwitchCostume((any)-1)
+  Say((any)Join((str)CostumeNumber(), Join(str 6, CostumeName())))
+  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
+  SwitchBackdrop((any)str 15)
+  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
+  NextBackdrop()
+  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
+  NextBackdrop()
+  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
+  SwitchBackdrop((any)str 16)
+  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
+  SwitchBackdrop((any)str 17)
+  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
+  SwitchBackdrop((any)3)
+  Say((any)Join((str)BackdropNumber(), Join(str 6, BackdropName())))
+  Say((any)SpriteSize())
+  SetSize(50.4)
+  ChangeSize(0.2)
+  Hide()
+  SetEffect(Ghost)(50)
+  ChangeEffect(Color)(25)
+  ClearEffects()
+  Show()
+  Say((any)str 20)
+fn 2 "A/receive ping"()
+  Say((any)str 21)
+fn 3 "A/receive afront"()
+  GoToLayer(true)()
+fn 4 "A/receive aback"()
+  GoLayers(Sub(0, 2))
+fn 5 "B/receive ping"()
+  Say((any)str 22)
+fn 6 "B/receive bforward"()
+  GoLayers(1)
+fn 7 "B/receive bfar"()
+  GoLayers(Sub(0, 100))
+fn 8 "C/receive ping"()
+  Say((any)str 23)
+fn 9 "C/receive cback"()
+  GoToLayer(false)()

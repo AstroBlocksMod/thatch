@@ -6,7 +6,11 @@ str 0 = "spin done"
 str 1 = "B set x"
 str 2 = "stopping"
 target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["backdrop1"]
 target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
   num 0 "x" = 0
   script FlagClicked -> fn 2
   script FlagClicked -> fn 3
