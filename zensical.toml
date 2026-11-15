@@ -1,6 +1,7 @@
 [project]
 site_name = "Thatch"
 site_description = "Compiles Scratch projects to native executables."
+site_url = "https://astroblocksmod.github.io/thatch/"
 repo_url = "https://github.com/AstroBlocksMod/thatch"
 repo_name = "AstroBlocksMod/thatch"
 copyright = "Thatch is free software under the Apache-2.0 license with LLVM exceptions"
