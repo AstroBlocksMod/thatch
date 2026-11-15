@@ -1,21 +1,21 @@
 name: Docs
 
+# Runs on every pull request (not only those touching docs/) so the check
+# always reports and can be made required in branch protection.
 on:
   push:
     branches: [main]
   pull_request:
-    paths:
-      - "docs/**"
-      - "zensical.toml"
-      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Pull requests cancel their own stale runs. On main, a Pages deployment that
+# has started is left to finish and the next one queues behind it.
 concurrency:
-  group: pages-${{ github.ref }}
-  cancel-in-progress: true
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -26,8 +26,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.3
-      - run: uvx zensical@0.1.1 build --clean --strict
-      - uses: actions/upload-pages-artifact@v5
+      # The lock pins Zensical and every dependency by hash, so a new release
+      # of one of them cannot start failing the strict build on its own.
+      - run: uv venv
+      - run: uv pip sync --require-hashes tools/docs/requirements.txt
+      - run: .venv/bin/zensical build --clean --strict
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
