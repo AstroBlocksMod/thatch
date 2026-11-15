@@ -9,6 +9,10 @@
 //! The same code serves two uses. `thatch run` compiles a project in memory and calls [`run`] with the
 //! program's init function. `thatch build` links the program against this crate built as
 //! `libthatch_runtime.a`, and the program's `main` calls `thatch_main`, which does the same thing.
+//!
+//! A host other than the headless one (a window, or Scratch Everywhere!) uses the `thatch_runtime_*`
+//! functions in [`api`] through the C header in `thatch-abi`: it creates a runtime with its own
+//! `thatch_abi::Host` table, loads the program and steps frames.
 
 mod api;
 mod host;
@@ -17,9 +21,7 @@ mod strings;
 mod thread;
 mod value;
 
-pub use api::symbols;
+pub use api::{host_symbols, symbols};
 pub use host::{RunOptions, RunReport, run};
 pub use scheduler::Runtime;
-
-/// The init function a compiled program exports: it registers the program with the runtime.
-pub type InitFn = unsafe extern "C" fn(*mut Runtime);
+pub use thatch_abi::InitFn;

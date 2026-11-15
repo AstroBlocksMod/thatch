@@ -58,6 +58,8 @@ Static types do most of the work. A variable that only ever holds numbers is an 
 
 Strings are immutable and reference counted. Generated code holds them as handles that a runtime call produced; those handles belong to the thread's temporaries and are released at the end of the statement that made them, except across a custom block call, where the callee's parameters may point at them. A variable holding a string keeps its own reference.
 
-## The headless host
+## Hosts
 
-The runtime's host prints every non-empty `say` and `think` as `Name says: text`, formatted the way scratch-vm's bubbles format numbers, with a virtual clock of one thirtieth of a second per frame so a run is repeatable. It stops when no script is left or when the frame limit is reached. The tests and the samples rely on it.
+A host is the program that owns the window, the clock and the frame loop. It creates a runtime with a table of callbacks (`say`, `now_ms`), loads the compiled program into it and steps frames through the `thatch_runtime_*` functions in the C header; see [the ABI](abi.md#writing-a-host). The runtime owns everything Scratch and calls the host back for what it cannot do itself.
+
+The headless host built into the runtime is the first implementation. It prints every non-empty `say` and `think` as `Name says: text`, formatted the way scratch-vm's bubbles format numbers, and passes no clock, so the runtime's virtual clock of one thirtieth of a second per frame makes each run repeatable. It stops when no script is left or when the frame limit is reached. The tests and the samples rely on it, and since it goes through the same C API a host in C would, they test that API too.

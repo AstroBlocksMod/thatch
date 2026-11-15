@@ -33,7 +33,7 @@ thatch build project.sb3 -o project
 ./project --frames 300
 ```
 
-writes an object file with Cranelift, then links it with `cc` against `libthatch_runtime.a`, which `thatch` looks for next to itself (`--runtime-lib` or `THATCH_RUNTIME_LIB` point it elsewhere). The executable takes the same `--frames`, `--timing` and `--seed` options as `thatch run`. `--object` writes only the object file.
+writes an object file with Cranelift, then links it with `cc` against `libthatch_runtime.a`, which `thatch` looks for next to itself (`--runtime-lib` or `THATCH_RUNTIME_LIB` point it elsewhere). The executable takes the same `--frames`, `--timing` and `--seed` options as `thatch run`. `--object` writes only the object file, and `--object --no-main` writes one without `main`, for a host of your own that includes `thatch.h` and drives the program itself (see [the ABI](abi.md#writing-a-host); `crates/thatch-cli/tests/c_host/host.c` is a complete example).
 
 ### Licenses of a built executable
 
