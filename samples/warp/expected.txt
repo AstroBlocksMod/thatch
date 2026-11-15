@@ -1,0 +1,3 @@
+Cat says: B set x
+Cat says: spin done
+Cat says: stopping

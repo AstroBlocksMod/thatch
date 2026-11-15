@@ -1,0 +1,44 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = ""
+str 1 = "score: "
+str 2 = "0.1"
+str 3 = "0.2"
+str 4 = "three"
+str 5 = "not three"
+str 6 = "Thatch"
+str 7 = "ATCH"
+str 8 = "2.5"
+str 9 = "3.14159"
+str 10 = "0.5"
+str 11 = "abc"
+str 12 = "ABC"
+target "Stage" (stage)
+  num 0 "score" = 0
+  any 0 "name" = Str(StrId(0))
+target "Cat"
+  script FlagClicked -> fn 0
+fn 0 "Cat/flag flag"()
+  set StageNum(0) = 0
+  repeat 3
+    set StageNum(0) = Add(ToNumber(StageNum(0)), 1)
+    Say((any)Join(str 1, (str)StageNum(0)))
+    yield
+  Say((any)Div(1, 3))
+  Say((any)Add(0.1, 0.2))
+  if Eq(StageNum(0), 3)
+    Say((any)str 4)
+  else
+    Say((any)str 5)
+  set StageAny(0) = str 6
+  Say((any)Join(LetterOf(1, (str)StageAny(0)), (str)Length((str)StageAny(0))))
+  Say((any)Contains((str)StageAny(0), str 7))
+  Say((any)Round(2.5))
+  Say((any)Mod(-7, 3))
+  Say((any)Sqrt(16))
+  Say((any)str 9)
+  Say((any)Lt(10, 9))
+  Think((any)Sub(0, 0.5))
+  Say((any)And(Gt(StageNum(0), 2), Not(Eq(str 11, str 12))))

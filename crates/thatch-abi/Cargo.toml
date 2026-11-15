@@ -1,0 +1,11 @@
+[package]
+name = "thatch-abi"
+description = "The C ABI between code compiled by Thatch and the runtime it links against"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

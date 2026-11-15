@@ -1,0 +1,20 @@
+[package]
+name = "thatch-codegen"
+description = "Lowers the Thatch IR to machine code with Cranelift, in memory or into an object file"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cranelift-codegen.workspace = true
+cranelift-frontend.workspace = true
+cranelift-jit.workspace = true
+cranelift-module.workspace = true
+cranelift-native.workspace = true
+cranelift-object.workspace = true
+thatch-abi.workspace = true
+thatch-ir.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

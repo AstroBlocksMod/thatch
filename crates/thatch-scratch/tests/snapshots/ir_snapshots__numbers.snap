@@ -1,0 +1,33 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = "["
+str 1 = "3.5"
+str 2 = "abc"
+str 3 = "]"
+str 4 = "0x200000000000011"
+str 5 = "1e-7"
+target "Stage" (stage)
+target "Cat"
+  num 0 "v" = 0
+  num 1 "i" = 0
+  script FlagClicked -> fn 0
+fn 0 "Cat/flag flag"()
+  Say((any)Add(ToNumber(Div(0, 0)), 1))
+  Say((any)Div(0, 0))
+  Say((any)Join(str 0, Join(LetterOf(3.5, str 2), str 3)))
+  Say((any)Join(str 0, Join(LetterOf(ToNumber(Div(0, 0)), str 2), str 3)))
+  set TargetNum(0) = Div(0, 0)
+  set TargetNum(0) = Add(ToNumber(TargetNum(0)), 1)
+  Say((any)TargetNum(0))
+  Say((any)Add(144115188075855900, 0))
+  Say((any)str 5)
+  Say((any)Add(0.0000001, 0))
+  set TargetNum(1) = 0
+  loop
+    if Not(Lt(TargetNum(1), 3))
+      break
+    set TargetNum(1) = Add(ToNumber(TargetNum(1)), 1)
+    yield
+  Say((any)TargetNum(1))

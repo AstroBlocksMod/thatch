@@ -1,0 +1,12 @@
+[package]
+name = "thatch-values"
+description = "Scratch value semantics: casting, comparison and number formatting as scratch-vm does them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ryu-js.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,3 @@
+Cat says: old
+Cat says: global old
+Cat says: new

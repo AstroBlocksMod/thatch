@@ -1,0 +1,37 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = "A after six deep"
+str 1 = "A after five deep"
+str 2 = "B "
+target "Stage" (stage)
+target "Cat"
+  num 0 "i" = 0
+  script FlagClicked -> fn 2
+  script FlagClicked -> fn 3
+fn 0 "Cat/five deep %s"(n: num)
+  if Gt(Param(0), 0)
+    if Not(false)
+      if Not(false)
+        if Not(false)
+          if Not(false)
+            call fn 0(Sub(ToNumber(Param(0)), 1)) nesting 5
+fn 1 "Cat/six deep %s"(n: num)
+  if Gt(Param(0), 0)
+    if Not(false)
+      if Not(false)
+        if Not(false)
+          if Not(false)
+            if Not(false)
+              call fn 1(Sub(ToNumber(Param(0)), 1)) nesting 6
+fn 2 "Cat/flag flagA"()
+  call fn 1(2) nesting 0
+  Say((any)str 0)
+  call fn 0(2) nesting 0
+  Say((any)str 1)
+fn 3 "Cat/flag flagB"()
+  repeat 3
+    Say((any)Join(str 2, (str)TargetNum(0)))
+    set TargetNum(0) = Add(ToNumber(TargetNum(0)), 1)
+    yield

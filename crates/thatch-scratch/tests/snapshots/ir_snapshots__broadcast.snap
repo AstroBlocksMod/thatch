@@ -1,0 +1,40 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = "A start"
+str 1 = "go"
+str 2 = "A after broadcast"
+str 3 = "A after wait"
+str 4 = "AGA"
+str 5 = "in"
+str 6 = "A end"
+str 7 = "B got go"
+str 8 = "0.1"
+str 9 = "B done"
+str 10 = "B got again"
+str 11 = "C got go"
+target "Stage" (stage)
+target "A"
+  script FlagClicked -> fn 0
+target "B"
+  script BroadcastReceived("go") -> fn 1
+  script BroadcastReceived("again") -> fn 2
+target "C"
+  script BroadcastReceived("go") -> fn 3
+fn 0 "A/flag flag"()
+  Say((any)str 0)
+  Broadcast(str 1)
+  Say((any)str 2)
+  BroadcastAndWait(str 1)
+  Say((any)str 3)
+  Broadcast(Join(str 4, str 5))
+  Say((any)str 6)
+fn 1 "B/receive go"()
+  Say((any)str 7)
+  Wait(0.1)
+  Say((any)str 9)
+fn 2 "B/receive again"()
+  Say((any)str 10)
+fn 3 "C/receive go"()
+  Say((any)str 11)

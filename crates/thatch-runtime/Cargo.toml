@@ -1,0 +1,17 @@
+[package]
+name = "thatch-runtime"
+description = "The runtime linked into every program Thatch compiles: scheduler, values, strings and the headless host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+corosensei.workspace = true
+thatch-abi.workspace = true
+thatch-values.workspace = true
+
+[lints]
+workspace = true

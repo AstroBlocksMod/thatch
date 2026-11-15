@@ -1,0 +1,39 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = ""
+str 1 = "sum "
+str 2 = " "
+str 3 = "other script sees i = "
+str 4 = "other script done"
+target "Stage" (stage)
+  num 0 "i" = 0
+  num 1 "sum" = 0
+  any 0 "text" = Str(StrId(0))
+target "Cat"
+  script FlagClicked -> fn 1
+  script FlagClicked -> fn 2
+fn 0 "Cat/sum up to %s"(n: num) warp
+  set StageNum(1) = 0
+  set StageNum(0) = 0
+  repeat ToNumber(Param(0))
+    set StageNum(0) = Add(ToNumber(StageNum(0)), 1)
+    set StageNum(1) = Add(ToNumber(StageNum(1)), ToNumber(Mul(ToNumber(StageNum(0)), ToNumber(Mod(ToNumber(StageNum(0)), 7)))))
+    yield
+fn 1 "Cat/flag flag"()
+  call fn 0(20000) nesting 0
+  Say((any)Join(str 1, (str)StageNum(1)))
+  set StageNum(0) = 0
+  set StageAny(0) = str 0
+  repeat 2000
+    set StageNum(0) = Add(ToNumber(StageNum(0)), 1)
+    if Eq(Mod(ToNumber(StageNum(0)), 500), 0)
+      set StageAny(0) = Join((str)StageAny(0), Join((str)StageNum(0), str 2))
+    yield
+  Say(StageAny(0))
+fn 2 "Cat/flag flagB"()
+  repeat 3
+    Say((any)Join(str 3, (str)StageNum(0)))
+    yield
+  Say((any)str 4)
