@@ -1,0 +1,30 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = "2"
+str 1 = "0.1"
+str 2 = "x"
+target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["costume1"]
+  any 0 "v" = Num(0.0)
+target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["2", "other", "x"]
+  script FlagClicked -> fn 0
+fn 0 "Cat/flag b1"()
+  SwitchCostume((any)str 0)
+  Say((any)CostumeName())
+  Wait(0.1)
+  SwitchCostume((any)str 2)
+  set StageAny(0) = str 0
+  SwitchCostume(StageAny(0))
+  Say((any)CostumeName())
+  Wait(0.1)
+  SwitchCostume((any)3)
+  Say((any)CostumeName())
+  Wait(0.1)
+  set StageAny(0) = Add((num)StageAny(0), 1)
+  SwitchCostume(StageAny(0))
+  Say((any)CostumeName())

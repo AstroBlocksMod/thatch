@@ -32,7 +32,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use corosensei::CoroutineResult;
-use thatch_abi::{EFFECT_COUNT, HAT_BROADCAST, HAT_FLAG, Host, OpaqueRuntime, TAG_STR, ThreadCtx, Value};
+use thatch_abi::{EFFECT_COUNT, HAT_BROADCAST, HAT_FLAG, HAT_KEY, Host, OpaqueRuntime, TAG_STR, ThreadCtx, Value};
 
 use crate::strings::{self, Handle};
 use crate::thread::{ScriptFn, Status, Thread, Yield};
@@ -43,6 +43,7 @@ const WORK_TIME: Duration = Duration::from_micros(25_000);
 
 pub struct Script {
     pub hat: i64,
+    /// The hat's argument (a broadcast or key name) in upper case, as `startHats` compares it.
     pub arg: String,
     pub func: ScriptFn,
 }
@@ -85,14 +86,23 @@ pub struct Runtime {
     /// move a sprite here by scratch-render's rules, which keep the stage at the back. A fractional
     /// layer move can leave this differing from `order`, as in scratch-vm.
     pub draw_order: Vec<usize>,
-    /// The mouse in Scratch coordinates, as the host last reported it.
+    /// The mouse in Scratch coordinates, as the host last reported it; see `input.rs`.
     pub mouse_x: f64,
     pub mouse_y: f64,
+    pub mouse_down: bool,
+    /// The keys held down, as Scratch names them ("A", "space", "left arrow").
+    pub keys_pressed: Vec<String>,
     consts: Vec<Rc<String>>,
     const_ptrs: Vec<Handle>,
     pub threads: Vec<Thread>,
     /// Threads replaced by a restart. Suspended ones are resumed to finish at the end of the pass.
     dying: Vec<Thread>,
+    /// The index of the thread being stepped, while one is.
+    stepping: Option<usize>,
+    /// After a `stop all` in the current pass, the length the thread list had then: scratch-vm
+    /// steps the rest of that old list, but not the threads started after the stop, which are in
+    /// its new list.
+    pass_end: Option<usize>,
     next_thread_id: u64,
     /// Whether a block asked for a redraw in this frame, which ends the frame after the current
     /// pass as in scratch-vm. Cleared when a frame starts.
@@ -123,10 +133,14 @@ impl Runtime {
             draw_order: Vec::new(),
             mouse_x: 0.0,
             mouse_y: 0.0,
+            mouse_down: false,
+            keys_pressed: Vec::new(),
             consts: Vec::new(),
             const_ptrs: Vec::new(),
             threads: Vec::new(),
             dying: Vec::new(),
+            stepping: None,
+            pass_end: None,
             next_thread_id: 1,
             redraw_requested: false,
             draw_requested: false,
@@ -245,7 +259,7 @@ impl Runtime {
     }
 
     pub fn add_script(&mut self, target: usize, hat: i64, arg: String, func: ScriptFn) {
-        self.targets[target].scripts.push(Script { hat, arg, func });
+        self.targets[target].scripts.push(Script { hat, arg: arg.to_uppercase(), func });
     }
 
     pub(crate) fn stage_index(&self) -> usize {
@@ -331,32 +345,44 @@ impl Runtime {
     /// Starts every script whose hat matches, as scratch-vm's `startHats` does: targets from front
     /// to back with the stage last, scripts in file order. A thread of the same script and target
     /// that is still in the thread list, even one that finished during this pass, is replaced in
-    /// place by the new one. Returns the ids of the threads started.
+    /// place by the new one, except for key hats, which leave a running thread alone and start
+    /// nothing. Threads a `stop all` stopped do not count. Returns the ids of the threads started.
     pub fn start_hats(&mut self, hat: i64, arg: &str) -> Vec<u64> {
+        self.start_hats_in(hat, arg, None)
+    }
+
+    /// [`Runtime::start_hats`] restricted to one target, as a click is.
+    pub fn start_hats_in(&mut self, hat: i64, arg: &str, only: Option<usize>) -> Vec<u64> {
         let mut started = Vec::new();
-        let order = self.order.clone();
-        for target in order.into_iter().rev() {
+        // Scripts keep their argument in upper case, so only this one needs converting.
+        let wanted = if hat == HAT_BROADCAST || hat == HAT_KEY { arg.to_uppercase() } else { String::new() };
+        // scratch-vm's `restartExistingThreads`: false for key hats, true for the rest.
+        let restart = hat != HAT_KEY;
+        let count = if only.is_some() { 1 } else { self.order.len() };
+        for k in (0..count).rev() {
+            let target = only.unwrap_or_else(|| self.order[k]);
             for script in 0..self.targets[target].scripts.len() {
                 let s = &self.targets[target].scripts[script];
-                if s.hat != hat {
+                if s.hat != hat || s.arg != wanted && (hat == HAT_BROADCAST || hat == HAT_KEY) {
                     continue;
                 }
-                let matches = match hat {
-                    HAT_BROADCAST => s.arg.to_uppercase() == arg.to_uppercase(),
-                    _ => true,
-                };
-                if !matches {
+                let same = |t: &Thread| t.target == target && t.script == script && !t.stopped;
+                // A key hat starts nothing while any thread of the script still runs. A killed one
+                // counts as done, as scratch-vm retires a stopped thread at once, but a killed one
+                // waiting to finish may sit in front of the live copy a later press started.
+                if !restart && self.threads.iter().any(|t| same(t) && t.status != Status::Done && !t.killed) {
                     continue;
                 }
+                let existing = self.threads.iter().position(same);
                 let thread = self.new_thread(target, script);
                 started.push(thread.id);
-                match self.threads.iter().position(|t| t.target == target && t.script == script) {
-                    Some(i) => {
+                match existing {
+                    Some(i) if restart => {
                         let mut old = std::mem::replace(&mut self.threads[i], thread);
                         old.kill();
                         self.dying.push(old);
                     }
-                    None => self.threads.push(thread),
+                    _ => self.threads.push(thread),
                 }
             }
         }
@@ -367,11 +393,21 @@ impl Runtime {
         self.threads.iter().find(|t| t.id == id).map(|t| t.status)
     }
 
-    /// Kills every thread, the part of `stop all` that does not call the host; [`Rt::stop_all`]
-    /// is the rest. Returns the targets whose bubbles need clearing.
-    fn kill_all(&mut self) -> Vec<usize> {
-        for t in &mut self.threads {
-            t.kill();
+    /// Stops every thread, the part of `stop all` that does not call the host; [`Rt::stop_all`]
+    /// is the rest. Returns the targets whose bubbles need clearing. scratch-vm's `stopAll` swaps
+    /// in an empty thread list while the sequencer still iterates the old one, so the threads after
+    /// the stopping one in the current pass get one more step before they are gone; those are
+    /// killed after that step instead of at once. Threads started after the stop belong to the new
+    /// list, which the pass does not reach (see `pass_end`), and a second stop in the same pass
+    /// empties that list again.
+    pub(crate) fn kill_all(&mut self) -> Vec<usize> {
+        let old_end = self.stepping.map(|_| *self.pass_end.get_or_insert(self.threads.len()));
+        for (i, t) in self.threads.iter_mut().enumerate() {
+            t.stopped = true;
+            match (self.stepping, old_end) {
+                (Some(current), Some(end)) if i > current && i < end => t.stop_after_step = true,
+                _ => t.kill(),
+            }
         }
         (0..self.targets.len()).filter(|i| !self.targets[*i].bubble.is_empty()).collect()
     }
@@ -424,7 +460,7 @@ impl Runtime {
             let mut stopped = false;
             let mut i = 0;
             // SAFETY: as above; each borrow ends before the next step resumes a thread.
-            while i < unsafe { (*rt).threads.len() } {
+            while i < unsafe { (*rt).pass_end.unwrap_or((*rt).threads.len()) } {
                 let (status, skip) = {
                     // SAFETY: as above.
                     let t = unsafe { &(&(*rt).threads)[i] };
@@ -432,8 +468,17 @@ impl Runtime {
                 };
                 // scratch-vm counts the thread it stepped, even when that thread replaced itself in
                 // the list by restarting its own script.
-                // SAFETY: forwarded from the caller.
-                let status = if skip { status } else { unsafe { Self::step(rt, i)? } };
+                let status = if skip {
+                    status
+                } else {
+                    // SAFETY: no thread runs between these borrows and the step.
+                    unsafe { (*rt).stepping = Some(i) };
+                    // SAFETY: forwarded from the caller.
+                    let status = unsafe { Self::step(rt, i) };
+                    // SAFETY: as above.
+                    unsafe { (*rt).stepping = None };
+                    status?
+                };
                 match status {
                     Status::Running => active += 1,
                     Status::Done => stopped = true,
@@ -444,6 +489,14 @@ impl Runtime {
             // SAFETY: no thread runs here.
             let done = unsafe {
                 let r = &mut *rt;
+                // After a `stop all`, the old list is gone with the pass: the threads it skipped
+                // (those waiting for the next frame) never run again.
+                if r.pass_end.take().is_some() {
+                    for t in r.threads.iter_mut().filter(|t| t.stop_after_step) {
+                        t.stop_after_step = false;
+                        t.kill();
+                    }
+                }
                 if stopped || r.threads.iter().any(|t| t.status == Status::Done) {
                     r.threads.retain(|t| t.status != Status::Done);
                 }
@@ -489,6 +542,12 @@ impl Runtime {
         if let Some(t) = slot {
             t.put_coroutine(coroutine);
             t.status = status;
+            if t.stop_after_step {
+                t.stop_after_step = false;
+                if status != Status::Done {
+                    t.kill();
+                }
+            }
         }
         Ok(status)
     }

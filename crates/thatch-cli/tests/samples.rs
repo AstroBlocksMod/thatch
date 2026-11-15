@@ -3,8 +3,10 @@
 //! `samples/<name>/expected.txt` holds the output of the same project on scratch-vm (see
 //! `samples/README.md`). Each sample runs three times: compiled in memory with `thatch run`, as a
 //! linked executable from `thatch build`, and under the C host in `c_host/host.c`, which tests
-//! `thatch.h` and the runtime's C API the way a real host uses them.
+//! `thatch.h` and the runtime's C API the way a real host uses them. A sample with an `input.txt`
+//! gets it as `--input`; the C host takes no input, so those samples skip it.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -26,6 +28,21 @@ fn sample_names() -> Vec<String> {
 
 fn expected(name: &str) -> String {
     std::fs::read_to_string(samples_dir().join(name).join("expected.txt")).expect("expected.txt")
+}
+
+fn input_script(name: &str) -> Option<PathBuf> {
+    let path = samples_dir().join(name).join("input.txt");
+    path.exists().then_some(path)
+}
+
+/// The run arguments of a sample: the frame limit and its input script, if it has one.
+fn run_args(name: &str) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec!["--frames".into(), "3000".into()];
+    if let Some(input) = input_script(name) {
+        args.push("--input".into());
+        args.push(input.into());
+    }
+    args
 }
 
 fn thatch() -> Command {
@@ -69,7 +86,7 @@ fn check_output(name: &str, mode: &str, output: &std::process::Output) {
 fn samples_run_in_memory() {
     for name in sample_names() {
         let project = samples_dir().join(&name).join("project.json");
-        let output = thatch().arg("run").arg(&project).arg("--frames").arg("3000").output().expect("thatch runs");
+        let output = thatch().arg("run").arg(&project).args(run_args(&name)).output().expect("thatch runs");
         check_output(&name, "run", &output);
     }
 }
@@ -91,7 +108,7 @@ fn samples_build_to_executables() {
             .output()
             .expect("thatch builds");
         assert!(build.status.success(), "{name} did not build: {}", String::from_utf8_lossy(&build.stderr));
-        let output = Command::new(&exe).arg("--frames").arg("3000").output().expect("the executable runs");
+        let output = Command::new(&exe).args(run_args(&name)).output().expect("the executable runs");
         check_output(&name, "build", &output);
     }
 }
@@ -103,6 +120,9 @@ fn samples_run_under_a_c_host() {
     let host_c = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/c_host/host.c");
     let out_dir = temp_out_dir("c-host");
     for name in sample_names() {
+        if input_script(&name).is_some() {
+            continue;
+        }
         let project = samples_dir().join(&name).join("project.json");
         let object = out_dir.path().join(format!("{name}.o"));
         let exe = out_dir.path().join(&name);

@@ -1,0 +1,25 @@
+Cat says: space is down
+Cat says: any key down: true
+Cat says: space hat
+Cat says: any hat
+Cat says: space is up
+Cat says: any key down: false
+Cat says: A by code: false
+Cat says: apple: true
+Cat says: b: false
+Cat says: a hat starts
+Cat says: any hat
+Cat says: any hat
+Cat says: left arrow hat
+Cat says: any hat
+Cat says: a hat ends
+Cat says: mouse down at 100,-50
+Stage says: stage clicked
+Cat says: mouse up
+Cat says: a hat starts
+Cat says: any hat
+Cat says: mouse down at 33,-34
+Stage says: stage clicked
+Cat says: a hat ends
+Cat says: mouse up
+Cat says: any hat

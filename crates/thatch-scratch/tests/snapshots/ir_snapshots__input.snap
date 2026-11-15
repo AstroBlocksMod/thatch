@@ -1,0 +1,88 @@
+---
+source: crates/thatch-scratch/tests/ir_snapshots.rs
+expression: "thatch_ir::dump(&lowered.program)"
+---
+str 0 = "stage clicked"
+str 1 = "space hat"
+str 2 = "a hat starts"
+str 3 = "a hat ends"
+str 4 = "any hat"
+str 5 = "left arrow hat"
+str 6 = "cat clicked"
+str 7 = "space"
+str 8 = "space is down"
+str 9 = "any key down: "
+str 10 = "any"
+str 11 = "space is up"
+str 12 = "a"
+str 13 = "A by code: "
+str 14 = "65"
+str 15 = "apple: "
+str 16 = "apple"
+str 17 = "b: "
+str 18 = "b"
+str 19 = "mouse down at "
+str 20 = ","
+str 21 = "mouse up"
+target "Stage" (stage)
+  backdrop 0 volume 100
+  costumes ["costume1"]
+  script StageClicked -> fn 0
+target "Cat"
+  at (0, 0) direction 90 size 100 costume 0 AllAround volume 100
+  costumes ["costume1"]
+  script KeyPressed("space") -> fn 1
+  script KeyPressed("a") -> fn 2
+  script KeyPressed("any") -> fn 3
+  script KeyPressed("left arrow") -> fn 4
+  script KeyPressed("q") -> fn 5
+  script SpriteClicked -> fn 6
+  script FlagClicked -> fn 7
+fn 0 "Stage/clicked b1"()
+  Say((any)str 0)
+fn 1 "Cat/key space"()
+  Say((any)str 1)
+fn 2 "Cat/key a"()
+  Say((any)str 2)
+  Wait(1)
+  Say((any)str 3)
+fn 3 "Cat/key any"()
+  Say((any)str 4)
+fn 4 "Cat/key left arrow"()
+  Say((any)str 5)
+fn 5 "Cat/key q"()
+  StopAll()
+fn 6 "Cat/clicked b15"()
+  Say((any)str 6)
+fn 7 "Cat/flag b17"()
+  loop
+    if KeyPressed((any)str 7)
+      break
+    yield
+  Say((any)str 8)
+  Say((any)Join(str 9, (str)KeyPressed((any)str 10)))
+  loop
+    if Not(KeyPressed((any)str 7))
+      break
+    yield
+  Say((any)str 11)
+  Say((any)Join(str 9, (str)KeyPressed((any)str 10)))
+  loop
+    if KeyPressed((any)str 12)
+      break
+    yield
+  Say((any)Join(str 13, (str)KeyPressed((any)str 14)))
+  Say((any)Join(str 15, (str)KeyPressed((any)str 16)))
+  Say((any)Join(str 17, (str)KeyPressed((any)str 18)))
+  loop
+    loop
+      if MouseDown()
+        break
+      yield
+    Say((any)Join(str 19, Join((str)MouseX(), Join(str 20, (str)MouseY()))))
+    loop
+      if Not(MouseDown())
+        break
+      yield
+    Say((any)str 21)
+    yield

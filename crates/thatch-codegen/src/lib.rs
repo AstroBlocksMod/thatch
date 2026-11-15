@@ -23,8 +23,8 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{DataDescription, DataId, FuncId as CFuncId, Linkage, Module, default_libcall_names};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use thatch_abi::{
-    AbiType, HAT_BROADCAST, HAT_FLAG, ROTATE_ALL_AROUND, ROTATE_DONT_ROTATE, ROTATE_LEFT_RIGHT, TAG_BOOL, TAG_NUM,
-    TAG_STR, ThreadCtx,
+    AbiType, HAT_BROADCAST, HAT_FLAG, HAT_KEY, HAT_SPRITE_CLICKED, HAT_STAGE_CLICKED, ROTATE_ALL_AROUND,
+    ROTATE_DONT_ROTATE, ROTATE_LEFT_RIGHT, TAG_BOOL, TAG_NUM, TAG_STR, ThreadCtx,
 };
 use thatch_ir::{BinOp, Const, Expr, FuncId, Hat, Program, RotationStyle, RtExpr, RtStmt, Stmt, Type, UnOp, VarRef};
 
@@ -284,6 +284,9 @@ impl<'a, M: Module> Compiler<'a, M> {
                 let (kind, arg) = match &s.hat {
                     Hat::FlagClicked => (HAT_FLAG, String::new()),
                     Hat::BroadcastReceived(name) => (HAT_BROADCAST, name.clone()),
+                    Hat::KeyPressed(key) => (HAT_KEY, key.clone()),
+                    Hat::SpriteClicked => (HAT_SPRITE_CLICKED, String::new()),
+                    Hat::StageClicked => (HAT_STAGE_CLICKED, String::new()),
                 };
                 scripts.push((kind, (self.data(&arg)?, arg.len()), self.funcs[s.func.0 as usize]));
             }
@@ -804,6 +807,13 @@ impl<'a, 'b, M: Module> FnGen<'a, 'b, M> {
                 let backdrop = self.b.ins().iconst(types::I8, i64::from(f == RtExpr::BackdropName));
                 self.temps = true;
                 self.rt_value(thatch_abi::COSTUME_NAME, &[self.ctx, backdrop])
+            }
+            RtExpr::MouseX => self.rt_value(thatch_abi::MOUSE_X, &[self.ctx]),
+            RtExpr::MouseY => self.rt_value(thatch_abi::MOUSE_Y, &[self.ctx]),
+            RtExpr::MouseDown => self.rt_value(thatch_abi::MOUSE_DOWN, &[self.ctx]),
+            RtExpr::KeyPressed => {
+                let key = self.any(&args[0]);
+                self.rt_value(thatch_abi::KEY_PRESSED, &[self.ctx, key])
             }
             RtExpr::PropertyOf => {
                 let property = self.string(&args[0]);

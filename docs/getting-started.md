@@ -26,6 +26,19 @@ compiles the project in memory and runs it headless: the scripts run as they wou
 
 `thatch run` also takes a bare `project.json`.
 
+A headless run has no keyboard or mouse, so `--input FILE` plays one from a script: one event per line, each starting with the frame it happens before.
+
+```text
+5 key down space
+10 key up space
+15 key down left arrow
+20 mouse 100 -50
+21 mouse down
+25 mouse up Cat
+```
+
+`key down` and `key up` take a key as the `when key pressed` menu names it. `mouse X Y` moves the pointer to Scratch coordinates, and `mouse down` and `mouse up` press and release the button over the named sprite, or over the stage when no name is given; naming a target the project lacks is an error. Words may be separated by any whitespace, and a key or sprite name is the rest of the line. The run goes on until no script is left and no event is still to come. `samples/input` is a complete example, and the same script format feeds the scratch-vm oracle in `tools/scratch-vm-oracle`.
+
 ## Building an executable
 
 ```sh
@@ -33,7 +46,7 @@ thatch build project.sb3 -o project
 ./project --frames 300
 ```
 
-writes an object file with Cranelift, then links it with `cc` against `libthatch_runtime.a`, which `thatch` looks for next to itself (`--runtime-lib` or `THATCH_RUNTIME_LIB` point it elsewhere). The executable takes the same `--frames`, `--timing` and `--seed` options as `thatch run`. `--object` writes only the object file, and `--object --no-main` writes one without `main`, for a host of your own that includes `thatch.h` and drives the program itself (see [the ABI](abi.md#writing-a-host); `crates/thatch-cli/tests/c_host/host.c` is a complete example).
+writes an object file with Cranelift, then links it with `cc` against `libthatch_runtime.a`, which `thatch` looks for next to itself (`--runtime-lib` or `THATCH_RUNTIME_LIB` point it elsewhere). The executable takes the same `--frames`, `--timing`, `--seed` and `--input` options as `thatch run`. `--object` writes only the object file, and `--object --no-main` writes one without `main`, for a host of your own that includes `thatch.h` and drives the program itself (see [the ABI](abi.md#writing-a-host); `crates/thatch-cli/tests/c_host/host.c` is a complete example).
 
 ### Licenses of a built executable
 

@@ -1,0 +1,1045 @@
+{
+ "targets": [
+  {
+   "isStage": true,
+   "name": "Stage",
+   "variables": {},
+   "lists": {},
+   "broadcasts": {},
+   "blocks": {
+    "b1": {
+     "opcode": "event_whenstageclicked",
+     "next": "b2",
+     "parent": null,
+     "inputs": {},
+     "fields": {},
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "b2": {
+     "opcode": "looks_say",
+     "next": null,
+     "parent": "b1",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "stage clicked"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    }
+   },
+   "currentCostume": 0,
+   "costumes": [
+    {
+     "name": "costume1",
+     "assetId": "00000000000000000000000000000000",
+     "md5ext": "00000000000000000000000000000000.svg",
+     "dataFormat": "svg",
+     "rotationCenterX": 0,
+     "rotationCenterY": 0
+    }
+   ],
+   "sounds": [],
+   "volume": 100,
+   "layerOrder": 0,
+   "tempo": 60,
+   "videoTransparency": 50,
+   "videoState": "off"
+  },
+  {
+   "isStage": false,
+   "name": "Cat",
+   "variables": {},
+   "lists": {},
+   "broadcasts": {},
+   "blocks": {
+    "b3": {
+     "opcode": "event_whenkeypressed",
+     "next": "b4",
+     "parent": null,
+     "inputs": {},
+     "fields": {
+      "KEY_OPTION": [
+       "space",
+       null
+      ]
+     },
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "b4": {
+     "opcode": "looks_say",
+     "next": null,
+     "parent": "b3",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "space hat"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b5": {
+     "opcode": "event_whenkeypressed",
+     "next": "b6",
+     "parent": null,
+     "inputs": {},
+     "fields": {
+      "KEY_OPTION": [
+       "a",
+       null
+      ]
+     },
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "b6": {
+     "opcode": "looks_say",
+     "next": "b7",
+     "parent": "b5",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "a hat starts"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b7": {
+     "opcode": "control_wait",
+     "next": "b8",
+     "parent": "b6",
+     "inputs": {
+      "DURATION": [
+       1,
+       [
+        4,
+        "1"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b8": {
+     "opcode": "looks_say",
+     "next": null,
+     "parent": "b7",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "a hat ends"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b9": {
+     "opcode": "event_whenkeypressed",
+     "next": "b10",
+     "parent": null,
+     "inputs": {},
+     "fields": {
+      "KEY_OPTION": [
+       "any",
+       null
+      ]
+     },
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "b10": {
+     "opcode": "looks_say",
+     "next": null,
+     "parent": "b9",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "any hat"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b11": {
+     "opcode": "event_whenkeypressed",
+     "next": "b12",
+     "parent": null,
+     "inputs": {},
+     "fields": {
+      "KEY_OPTION": [
+       "left arrow",
+       null
+      ]
+     },
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "b12": {
+     "opcode": "looks_say",
+     "next": null,
+     "parent": "b11",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "left arrow hat"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b13": {
+     "opcode": "event_whenkeypressed",
+     "next": "b14",
+     "parent": null,
+     "inputs": {},
+     "fields": {
+      "KEY_OPTION": [
+       "q",
+       null
+      ]
+     },
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "b14": {
+     "opcode": "control_stop",
+     "next": null,
+     "parent": "b13",
+     "inputs": {},
+     "fields": {
+      "STOP_OPTION": [
+       "all",
+       null
+      ]
+     },
+     "shadow": false,
+     "topLevel": false,
+     "mutation": {
+      "tagName": "mutation",
+      "children": [],
+      "hasnext": "false"
+     }
+    },
+    "b15": {
+     "opcode": "event_whenthisspriteclicked",
+     "next": "b16",
+     "parent": null,
+     "inputs": {},
+     "fields": {},
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "b16": {
+     "opcode": "looks_say",
+     "next": null,
+     "parent": "b15",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "cat clicked"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b17": {
+     "opcode": "event_whenflagclicked",
+     "next": "b18",
+     "parent": null,
+     "inputs": {},
+     "fields": {},
+     "shadow": false,
+     "topLevel": true,
+     "x": 0,
+     "y": 0
+    },
+    "b18": {
+     "opcode": "control_wait_until",
+     "next": "b21",
+     "parent": "b17",
+     "inputs": {
+      "CONDITION": [
+       2,
+       "b19"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b19": {
+     "opcode": "sensing_keypressed",
+     "next": null,
+     "parent": "b18",
+     "inputs": {
+      "KEY_OPTION": [
+       1,
+       "m20"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "m20": {
+     "opcode": "sensing_keyoptions",
+     "next": null,
+     "parent": "b19",
+     "inputs": {},
+     "fields": {
+      "KEY_OPTION": [
+       "space",
+       null
+      ]
+     },
+     "shadow": true,
+     "topLevel": false
+    },
+    "b21": {
+     "opcode": "looks_say",
+     "next": "b22",
+     "parent": "b18",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "space is down"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b22": {
+     "opcode": "looks_say",
+     "next": "b26",
+     "parent": "b21",
+     "inputs": {
+      "MESSAGE": [
+       3,
+       "b23",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b23": {
+     "opcode": "operator_join",
+     "next": null,
+     "parent": "b22",
+     "inputs": {
+      "STRING1": [
+       1,
+       [
+        10,
+        "any key down: "
+       ]
+      ],
+      "STRING2": [
+       3,
+       "b24",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b24": {
+     "opcode": "sensing_keypressed",
+     "next": null,
+     "parent": "b23",
+     "inputs": {
+      "KEY_OPTION": [
+       1,
+       "m25"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "m25": {
+     "opcode": "sensing_keyoptions",
+     "next": null,
+     "parent": "b24",
+     "inputs": {},
+     "fields": {
+      "KEY_OPTION": [
+       "any",
+       null
+      ]
+     },
+     "shadow": true,
+     "topLevel": false
+    },
+    "b26": {
+     "opcode": "control_wait_until",
+     "next": "b30",
+     "parent": "b22",
+     "inputs": {
+      "CONDITION": [
+       2,
+       "b27"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b27": {
+     "opcode": "operator_not",
+     "next": null,
+     "parent": "b26",
+     "inputs": {
+      "OPERAND": [
+       2,
+       "b28"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b28": {
+     "opcode": "sensing_keypressed",
+     "next": null,
+     "parent": "b27",
+     "inputs": {
+      "KEY_OPTION": [
+       1,
+       "m29"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "m29": {
+     "opcode": "sensing_keyoptions",
+     "next": null,
+     "parent": "b28",
+     "inputs": {},
+     "fields": {
+      "KEY_OPTION": [
+       "space",
+       null
+      ]
+     },
+     "shadow": true,
+     "topLevel": false
+    },
+    "b30": {
+     "opcode": "looks_say",
+     "next": "b31",
+     "parent": "b26",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "space is up"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b31": {
+     "opcode": "looks_say",
+     "next": "b35",
+     "parent": "b30",
+     "inputs": {
+      "MESSAGE": [
+       3,
+       "b32",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b32": {
+     "opcode": "operator_join",
+     "next": null,
+     "parent": "b31",
+     "inputs": {
+      "STRING1": [
+       1,
+       [
+        10,
+        "any key down: "
+       ]
+      ],
+      "STRING2": [
+       3,
+       "b33",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b33": {
+     "opcode": "sensing_keypressed",
+     "next": null,
+     "parent": "b32",
+     "inputs": {
+      "KEY_OPTION": [
+       1,
+       "m34"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "m34": {
+     "opcode": "sensing_keyoptions",
+     "next": null,
+     "parent": "b33",
+     "inputs": {},
+     "fields": {
+      "KEY_OPTION": [
+       "any",
+       null
+      ]
+     },
+     "shadow": true,
+     "topLevel": false
+    },
+    "b35": {
+     "opcode": "control_wait_until",
+     "next": "b38",
+     "parent": "b31",
+     "inputs": {
+      "CONDITION": [
+       2,
+       "b36"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b36": {
+     "opcode": "sensing_keypressed",
+     "next": null,
+     "parent": "b35",
+     "inputs": {
+      "KEY_OPTION": [
+       1,
+       "m37"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "m37": {
+     "opcode": "sensing_keyoptions",
+     "next": null,
+     "parent": "b36",
+     "inputs": {},
+     "fields": {
+      "KEY_OPTION": [
+       "a",
+       null
+      ]
+     },
+     "shadow": true,
+     "topLevel": false
+    },
+    "b38": {
+     "opcode": "looks_say",
+     "next": "b41",
+     "parent": "b35",
+     "inputs": {
+      "MESSAGE": [
+       3,
+       "b39",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b39": {
+     "opcode": "operator_join",
+     "next": null,
+     "parent": "b38",
+     "inputs": {
+      "STRING1": [
+       1,
+       [
+        10,
+        "A by code: "
+       ]
+      ],
+      "STRING2": [
+       3,
+       "b40",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b40": {
+     "opcode": "sensing_keypressed",
+     "next": null,
+     "parent": "b39",
+     "inputs": {
+      "KEY_OPTION": [
+       1,
+       [
+        4,
+        "65"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b41": {
+     "opcode": "looks_say",
+     "next": "b44",
+     "parent": "b38",
+     "inputs": {
+      "MESSAGE": [
+       3,
+       "b42",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b42": {
+     "opcode": "operator_join",
+     "next": null,
+     "parent": "b41",
+     "inputs": {
+      "STRING1": [
+       1,
+       [
+        10,
+        "apple: "
+       ]
+      ],
+      "STRING2": [
+       3,
+       "b43",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b43": {
+     "opcode": "sensing_keypressed",
+     "next": null,
+     "parent": "b42",
+     "inputs": {
+      "KEY_OPTION": [
+       1,
+       [
+        10,
+        "apple"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b44": {
+     "opcode": "looks_say",
+     "next": "b48",
+     "parent": "b41",
+     "inputs": {
+      "MESSAGE": [
+       3,
+       "b45",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b45": {
+     "opcode": "operator_join",
+     "next": null,
+     "parent": "b44",
+     "inputs": {
+      "STRING1": [
+       1,
+       [
+        10,
+        "b: "
+       ]
+      ],
+      "STRING2": [
+       3,
+       "b46",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b46": {
+     "opcode": "sensing_keypressed",
+     "next": null,
+     "parent": "b45",
+     "inputs": {
+      "KEY_OPTION": [
+       1,
+       "m47"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "m47": {
+     "opcode": "sensing_keyoptions",
+     "next": null,
+     "parent": "b46",
+     "inputs": {},
+     "fields": {
+      "KEY_OPTION": [
+       "b",
+       null
+      ]
+     },
+     "shadow": true,
+     "topLevel": false
+    },
+    "b48": {
+     "opcode": "control_forever",
+     "next": null,
+     "parent": "b44",
+     "inputs": {
+      "SUBSTACK": [
+       2,
+       "b49"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b49": {
+     "opcode": "control_wait_until",
+     "next": "b51",
+     "parent": "b48",
+     "inputs": {
+      "CONDITION": [
+       2,
+       "b50"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b50": {
+     "opcode": "sensing_mousedown",
+     "next": null,
+     "parent": "b49",
+     "inputs": {},
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b51": {
+     "opcode": "looks_say",
+     "next": "b57",
+     "parent": "b49",
+     "inputs": {
+      "MESSAGE": [
+       3,
+       "b52",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b52": {
+     "opcode": "operator_join",
+     "next": null,
+     "parent": "b51",
+     "inputs": {
+      "STRING1": [
+       1,
+       [
+        10,
+        "mouse down at "
+       ]
+      ],
+      "STRING2": [
+       3,
+       "b53",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b53": {
+     "opcode": "operator_join",
+     "next": null,
+     "parent": "b52",
+     "inputs": {
+      "STRING1": [
+       3,
+       "b54",
+       [
+        10,
+        ""
+       ]
+      ],
+      "STRING2": [
+       3,
+       "b55",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b54": {
+     "opcode": "sensing_mousex",
+     "next": null,
+     "parent": "b53",
+     "inputs": {},
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b55": {
+     "opcode": "operator_join",
+     "next": null,
+     "parent": "b53",
+     "inputs": {
+      "STRING1": [
+       1,
+       [
+        10,
+        ","
+       ]
+      ],
+      "STRING2": [
+       3,
+       "b56",
+       [
+        10,
+        ""
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b56": {
+     "opcode": "sensing_mousey",
+     "next": null,
+     "parent": "b55",
+     "inputs": {},
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b57": {
+     "opcode": "control_wait_until",
+     "next": "b60",
+     "parent": "b51",
+     "inputs": {
+      "CONDITION": [
+       2,
+       "b58"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b58": {
+     "opcode": "operator_not",
+     "next": null,
+     "parent": "b57",
+     "inputs": {
+      "OPERAND": [
+       2,
+       "b59"
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b59": {
+     "opcode": "sensing_mousedown",
+     "next": null,
+     "parent": "b58",
+     "inputs": {},
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    },
+    "b60": {
+     "opcode": "looks_say",
+     "next": null,
+     "parent": "b57",
+     "inputs": {
+      "MESSAGE": [
+       1,
+       [
+        10,
+        "mouse up"
+       ]
+      ]
+     },
+     "fields": {},
+     "shadow": false,
+     "topLevel": false
+    }
+   },
+   "currentCostume": 0,
+   "costumes": [
+    {
+     "name": "costume1",
+     "assetId": "00000000000000000000000000000000",
+     "md5ext": "00000000000000000000000000000000.svg",
+     "dataFormat": "svg",
+     "rotationCenterX": 0,
+     "rotationCenterY": 0
+    }
+   ],
+   "sounds": [],
+   "volume": 100,
+   "layerOrder": 1,
+   "visible": true,
+   "x": 0,
+   "y": 0,
+   "size": 100,
+   "direction": 90,
+   "draggable": false,
+   "rotationStyle": "all around"
+  }
+ ],
+ "monitors": [],
+ "extensions": [],
+ "meta": {
+  "semver": "3.0.0",
+  "vm": "0.2.0",
+  "agent": ""
+ }
+}

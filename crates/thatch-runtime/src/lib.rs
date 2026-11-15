@@ -18,6 +18,7 @@
 
 pub mod api;
 mod host;
+mod input;
 mod scheduler;
 mod sprite;
 mod strings;
@@ -25,6 +26,6 @@ mod thread;
 mod value;
 
 pub use api::{host_symbols, symbols};
-pub use host::{RunOptions, RunReport, run};
+pub use host::{Input, InputEvent, RunOptions, RunReport, parse_input_script, run};
 pub use scheduler::Runtime;
 pub use thatch_abi::InitFn;

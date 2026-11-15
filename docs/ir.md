@@ -17,7 +17,7 @@ Conversions are explicit `Cast` expressions. The frontend inserts them wherever 
 
 ## Programs
 
-A program has targets (the stage first, then the sprites back to front), a string constant pool, and functions. Each target has its numeric variables, its dynamically typed variables, its scripts, each of which is a hat and a function, its costume names, and the state it starts in (`SpriteState`: position, direction, size, costume, visibility, rotation style, draggability and volume). A function has typed parameters, a body, and a `warp` flag for custom blocks that run without screen refresh.
+A program has targets (the stage first, then the sprites back to front), a string constant pool, and functions. Each target has its numeric variables, its dynamically typed variables, its scripts, each of which is a hat and a function, its costume names, and the state it starts in (`SpriteState`: position, direction, size, costume, visibility, rotation style, draggability and volume). A hat is the green flag, a broadcast with its message name, a key with its name, `when this sprite clicked` or `when stage clicked`. A function has typed parameters, a body, and a `warp` flag for custom blocks that run without screen refresh.
 
 Variables are addressed as `TargetNum`, `TargetAny`, `StageNum` or `StageAny` with an index, or as `Param` for a function parameter. A sprite reaching for a global variable uses the stage forms.
 
@@ -49,7 +49,9 @@ Variables are addressed as `TargetNum`, `TargetAny`, `StageNum` or `StageAny` wi
 
 ## Expressions
 
-Literals, variables, casts, unary and binary operators, and runtime reporters (`join`, `letter of`, `length of`, `contains`, `pick random`, `timer`, the sprite's position, direction and size, costume and backdrop numbers and names, and `PropertyOf`, the `of` block, which is the one reporter of type `Any`: it looks a property or variable up by name at run time).
+Literals, variables, casts, unary and binary operators, and runtime reporters (`join`, `letter of`, `length of`, `contains`, `pick random`, `timer`, the sprite's position, direction and size, costume and backdrop numbers and names, the mouse position and button, `key pressed?`, and `PropertyOf`, the `of` block, which is the one reporter of type `Any`: it looks a property or variable up by name at run time).
+
+A value typed into a block in the project file is text to scratch-vm, and most blocks cast it the same way they would cast the number it spells, so the frontend turns such a literal into a `Num` when that is safe. The blocks that ask whether their input is a number (`key pressed?`, `switch costume to`, `switch backdrop to`) get the literal as a `Str`.
 
 The comparison operators take operands of any type and compare them as scratch-vm's `Cast.compare` does. A backend may compare two `Num` operands directly, as the Cranelift backend does, as long as NaN still compares as the string "nan".
 
