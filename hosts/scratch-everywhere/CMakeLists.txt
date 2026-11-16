@@ -195,8 +195,10 @@ if(BUILD_TESTING)
                 "-DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/tests/expected.txt"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run.cmake")
         # No window and no sound: SDL draws into memory, so the test runs anywhere, and does the
-        # same on a desk as in CI. The other backends ignore these.
+        # same on a desk as in CI. The library asks SDL for an accelerated renderer, which a
+        # machine without a display does not have, so SDL is told to use its software renderer.
+        # The other backends ignore these.
         set_tests_properties(sprites_follow_the_runtime PROPERTIES
-            ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+            ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;SDL_RENDER_DRIVER=software")
     endif()
 endif()
