@@ -205,7 +205,17 @@ endif()
 # `cmake --install` puts the host into Thatch's data directory, where any thatch looks for it,
 # including one from `cargo install`, which comes without a host and without the runtime library.
 # The directory is worked out the way `thatch` works it out.
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+#
+# CMake's own default prefix (/usr/local, or Program Files on Windows) is replaced, also when an
+# earlier configure already wrote it to the cache: CMake says it was a default only on the first
+# configure of a build directory, and no thatch looks for hosts in a system prefix. So is the data
+# directory an earlier configure picked, so that it follows THATCH_HOME. Any other prefix was
+# chosen on purpose and is kept, and `cmake --install --prefix` still overrides all of them.
+set(THATCH_STOCK_PREFIXES "/usr/local" "C:/Program Files/${PROJECT_NAME}" "C:/Program Files (x86)/${PROJECT_NAME}")
+if(DEFINED THATCH_PICKED_PREFIX)
+    list(APPEND THATCH_STOCK_PREFIXES "${THATCH_PICKED_PREFIX}")
+endif()
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OR CMAKE_INSTALL_PREFIX IN_LIST THATCH_STOCK_PREFIXES)
     if(DEFINED ENV{THATCH_HOME} AND NOT "$ENV{THATCH_HOME}" STREQUAL "")
         set(THATCH_DATA_DIR "$ENV{THATCH_HOME}")
     elseif(APPLE)
@@ -216,7 +226,9 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
         set(THATCH_DATA_DIR "$ENV{HOME}/.local/share/thatch")
     endif()
     set(CMAKE_INSTALL_PREFIX "${THATCH_DATA_DIR}" CACHE PATH "Thatch's data directory" FORCE)
+    set(THATCH_PICKED_PREFIX "${THATCH_DATA_DIR}" CACHE INTERNAL "The install prefix this build picked itself")
 endif()
+message(STATUS "cmake --install puts the host into ${CMAKE_INSTALL_PREFIX}")
 
 # The host goes to hosts/scratch-everywhere as the build leaves it in lib/: the paths in its
 # description are relative, so it works from anywhere.
