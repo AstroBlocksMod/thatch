@@ -30,7 +30,7 @@ A Cargo workspace. The crates, in pipeline order (see `docs/architecture.md` for
 
 Outside `crates/`: `samples/` (test projects as `project.json` with the `expected.txt` scratch-vm prints for them), `tools/scratch-vm-oracle/` (the Node script that produces those), `docs/` (the Zensical site), `hosts/` (headed hosts that live outside the Cargo workspace, each fenced off as described above; planned: `hosts/scratch-everywhere/`).
 
-Planned, not yet present: an optimizer crate over the IR, the Scratch Everywhere! host, a wgpu host of our own, benchmarks, an LLVM backend, a pass that makes scripts resumable without stack switching, a tiering JIT, and a serialized IR format with JVM and CLR backends on top of it.
+Planned, not yet present: an optimizer crate over the IR, the Scratch Everywhere! host, a wgpu host of our own, benchmarks, an LLVM backend, a pass that makes scripts resumable without stack switching, a tiering JIT, a WebAssembly backend that runs as a JIT in the browser, and a serialized IR format with JVM and CLR backends on top of it.
 
 ### Rules that keep the layers separate
 
