@@ -35,7 +35,8 @@ enum Cmd {
         #[arg(long)]
         input: Option<PathBuf>,
     },
-    /// Compiles a project to a standalone executable.
+    /// Compiles a project to a standalone executable, and writes the license notices that have to
+    /// ship with it next to it, as OUTPUT.licenses.txt.
     Build {
         project: PathBuf,
         /// The executable to write (or the object file with --object).
@@ -49,7 +50,8 @@ enum Cmd {
         #[arg(long, requires = "object")]
         no_main: bool,
         /// The runtime library to link against. Defaults to libthatch_runtime.a next to this
-        /// executable, or $THATCH_RUNTIME_LIB.
+        /// executable, or $THATCH_RUNTIME_LIB. Its license notices are expected next to it, with
+        /// the extension .licenses.txt in place of .a, where building the runtime puts them.
         #[arg(long)]
         runtime_lib: Option<PathBuf>,
     },
@@ -161,33 +163,78 @@ fn build(
         return Ok(());
     }
     let runtime = find_runtime_lib(runtime_lib)?;
+    let notices = runtime_notices(&runtime)?;
     let exe = work.path().join(&stem);
     let status = Command::new("cc")
         .arg("-o")
         .arg(&exe)
         .arg(&object)
-        .arg(&runtime)
+        .arg(&runtime.path)
         .args(system_libs()?)
         .status()
         .context("could not run cc; a C compiler is needed to link")?;
     if !status.success() {
         bail!("linking failed");
     }
+    // The notices go next to the executable, since whoever ships the one has to ship the other.
+    let notices_file = work.path().join("licenses.txt");
+    let notices_output = notices_path(&output);
+    std::fs::write(&notices_file, notices).with_context(|| format!("could not write {}", notices_output.display()))?;
     std::fs::rename(&exe, &output).with_context(|| format!("could not write {}", output.display()))?;
+    std::fs::rename(&notices_file, &notices_output)
+        .with_context(|| format!("could not write {}", notices_output.display()))?;
     Ok(())
 }
 
-fn find_runtime_lib(given: Option<PathBuf>) -> anyhow::Result<PathBuf> {
-    if let Some(p) = given {
-        return Ok(p);
+/// Where the license notices of the executable `output` go: next to it, under its whole file name
+/// with `.licenses.txt` added, so that `game` and `game.exe` cannot collide.
+fn notices_path(output: &Path) -> PathBuf {
+    let mut name = output.file_name().unwrap_or_default().to_owned();
+    name.push(".licenses.txt");
+    output.with_file_name(name)
+}
+
+/// The runtime library to link.
+struct RuntimeLib {
+    path: PathBuf,
+    /// Whether it is the library next to `thatch`, which was built together with it.
+    beside_thatch: bool,
+}
+
+fn find_runtime_lib(given: Option<PathBuf>) -> anyhow::Result<RuntimeLib> {
+    if let Some(path) = given {
+        return Ok(RuntimeLib { path, beside_thatch: false });
     }
     if let Ok(p) = std::env::var("THATCH_RUNTIME_LIB") {
-        return Ok(PathBuf::from(p));
+        return Ok(RuntimeLib { path: PathBuf::from(p), beside_thatch: false });
     }
     let exe = std::env::current_exe().context("could not find the thatch executable")?;
     let beside = exe.parent().map(|d| d.join("libthatch_runtime.a"));
     match beside {
-        Some(p) if p.exists() => Ok(p),
+        Some(path) if path.exists() => Ok(RuntimeLib { path, beside_thatch: true }),
         _ => bail!("libthatch_runtime.a was not found next to thatch; pass --runtime-lib or set THATCH_RUNTIME_LIB"),
+    }
+}
+
+/// The license notices of a runtime library: the texts that have to ship with every executable
+/// linked against it. Building the runtime writes them next to the library, with the extension
+/// `.licenses.txt` (see `crates/thatch-runtime/build.rs`). Without that file, the notices of the
+/// runtime `thatch` itself was built with stand in. They are the right ones for the library next
+/// to `thatch`; for any other library they may not be, so that case gets a warning.
+fn runtime_notices(runtime: &RuntimeLib) -> anyhow::Result<String> {
+    let beside = runtime.path.with_extension("licenses.txt");
+    match std::fs::read_to_string(&beside) {
+        Ok(text) => Ok(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if !runtime.beside_thatch {
+                eprintln!(
+                    "warning: {} was not found, so the license notices written next to the executable are those of \
+                     the runtime thatch was built with; check them against the library you linked before shipping",
+                    beside.display()
+                );
+            }
+            Ok(thatch_runtime::LICENSE_NOTICES.to_owned())
+        }
+        Err(e) => Err(e).with_context(|| format!("could not read {}", beside.display())),
     }
 }

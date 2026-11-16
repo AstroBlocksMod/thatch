@@ -13,5 +13,13 @@ corosensei.workspace = true
 thatch-abi.workspace = true
 thatch-values.workspace = true
 
+# The build script gathers the license notices of everything above (see build.rs), and a test
+# checks its list against the dependency tree. Neither is linked into executables.
+[build-dependencies]
+serde_json.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

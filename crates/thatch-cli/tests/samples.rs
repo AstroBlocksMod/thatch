@@ -113,6 +113,63 @@ fn samples_build_to_executables() {
     }
 }
 
+/// The notices a built executable has to ship are written next to it: the ones gathered when the
+/// runtime library was built, which lie next to that library.
+#[test]
+fn a_build_writes_the_license_notices_next_to_the_executable() {
+    let runtime_lib = runtime_lib();
+    let gathered = std::fs::read_to_string(runtime_lib.with_extension("licenses.txt"))
+        .expect("building the runtime writes its notices next to the library");
+    assert!(gathered.contains("corosensei") && gathered.contains("The Rust standard library"), "{gathered}");
+    assert!(!gathered.contains("THIS FILE IS INCOMPLETE"), "{gathered}");
+
+    let out_dir = temp_out_dir("notices");
+    let project = samples_dir().join("hello").join("project.json");
+    let exe = out_dir.path().join("hello.bin");
+    let build = thatch()
+        .arg("build")
+        .arg(&project)
+        .arg("-o")
+        .arg(&exe)
+        .arg("--runtime-lib")
+        .arg(&runtime_lib)
+        .output()
+        .expect("thatch builds");
+    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+    // The linker may have warnings of its own; thatch has none about the notices.
+    let stderr = String::from_utf8_lossy(&build.stderr);
+    assert!(!stderr.contains("licenses.txt"), "{stderr}");
+    let written = std::fs::read_to_string(out_dir.path().join("hello.bin.licenses.txt")).expect("the notices");
+    assert_eq!(written, gathered);
+
+    // A runtime library without notices next to it: the build goes through with the notices
+    // thatch has built in, and says so.
+    let lone = out_dir.path().join("libother.a");
+    std::fs::copy(&runtime_lib, &lone).expect("the library copies");
+    let exe = out_dir.path().join("lone");
+    let build = thatch()
+        .arg("build")
+        .arg(&project)
+        .arg("-o")
+        .arg(&exe)
+        .arg("--runtime-lib")
+        .arg(&lone)
+        .output()
+        .expect("thatch builds");
+    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+    let stderr = String::from_utf8_lossy(&build.stderr);
+    assert!(stderr.contains("warning:") && stderr.contains("libother.licenses.txt"), "{stderr}");
+    let written = std::fs::read_to_string(out_dir.path().join("lone.licenses.txt")).expect("the notices");
+    assert_eq!(written, gathered, "thatch and the library were built together, so the notices agree");
+
+    // An object file is not something to ship, so it gets no notices.
+    let object = out_dir.path().join("hello.o");
+    let build =
+        thatch().arg("build").arg(&project).arg("--object").arg("-o").arg(&object).output().expect("thatch builds");
+    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+    assert!(!out_dir.path().join("hello.o.licenses.txt").exists());
+}
+
 #[test]
 fn samples_run_under_a_c_host() {
     let runtime_lib = runtime_lib();
