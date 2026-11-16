@@ -5,7 +5,7 @@
 //! hats scratch-vm would start. Which target is under the mouse is the host's business, since only
 //! it knows what it drew.
 
-use thatch_abi::{HAT_KEY, HAT_SPRITE_CLICKED, HAT_STAGE_CLICKED, STAGE_HEIGHT, STAGE_WIDTH};
+use thatch_abi::{HAT_KEY, HAT_SPRITE_CLICKED, HAT_STAGE_CLICKED};
 use thatch_values::{ValueRef, clamp, round, to_string};
 
 use crate::scheduler::Runtime;
@@ -84,14 +84,15 @@ impl Runtime {
     }
 
     /// The mouse moved to a point in Scratch coordinates, which scratch-vm rounds and clamps to the
-    /// stage. A NaN coordinate is ignored and the old one kept, as scratch-vm's mouse skips a
-    /// coordinate that is not truthy, so the mouse position is never NaN.
+    /// stage, whose size is the runtime's. A NaN coordinate is ignored and the old one kept, as
+    /// scratch-vm's mouse skips a coordinate that is not truthy, so the mouse position is never NaN.
     pub fn mouse_move(&mut self, x: f64, y: f64) {
+        let (half_w, half_h) = (self.stage.width / 2.0, self.stage.height / 2.0);
         if !x.is_nan() {
-            self.mouse_x = round(clamp(x, -STAGE_WIDTH / 2.0, STAGE_WIDTH / 2.0));
+            self.mouse_x = round(clamp(x, -half_w, half_w));
         }
         if !y.is_nan() {
-            self.mouse_y = round(clamp(y, -STAGE_HEIGHT / 2.0, STAGE_HEIGHT / 2.0));
+            self.mouse_y = round(clamp(y, -half_h, half_h));
         }
     }
 
@@ -127,6 +128,7 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scheduler::Stage;
 
     #[test]
     fn key_names_follow_scratch() {
@@ -158,6 +160,27 @@ mod tests {
             assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (10.0, -20.0));
             (*rt).mouse_move(5.0, f64::NAN);
             assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (5.0, -20.0));
+            Runtime::destroy(rt);
+        }
+    }
+
+    #[test]
+    fn the_mouse_is_clamped_to_the_stage_the_runtime_has() {
+        let host = thatch_abi::Host {
+            data: std::ptr::null_mut(),
+            say: None,
+            now_ms: None,
+            sprite_changed: None,
+            measure: None,
+        };
+        let rt = Runtime::create(host, 1);
+        // SAFETY: a runtime of this test only, with no threads and no callbacks.
+        unsafe {
+            assert!((*rt).set_stage(Stage { width: 640.0, height: 200.0, frame_rate: 60.0 }));
+            (*rt).mouse_move(1000.0, 1000.0);
+            assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (320.0, 100.0));
+            (*rt).mouse_move(-300.0, -150.0);
+            assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (-300.0, -100.0));
             Runtime::destroy(rt);
         }
     }

@@ -82,7 +82,7 @@ typedef struct ThatchHost {
 } ThatchHost;
 ```
 
-Zero the struct first, so that callbacks added in later versions are null. A null callback means the host does not care. Without `now_ms` the runtime uses a virtual clock of one frame per thirtieth of a second, which is what makes the headless host's runs repeatable; a windowed host passes its real clock.
+Zero the struct first, so that callbacks added in later versions are null. A null callback means the host does not care. Without `now_ms` the runtime uses a virtual clock that moves by one frame each time a frame runs (a thirtieth of a second at Scratch's frame rate), which is what makes the headless host's runs repeatable; a windowed host passes its real clock.
 
 The two sprite callbacks decide how much of scratch-vm's renderer behavior the runtime reproduces, because scratch-vm itself behaves differently with and without one:
 
@@ -96,7 +96,8 @@ Then it drives the runtime through the `thatch_runtime_*` functions:
 ```mermaid
 flowchart TD
     create["thatch_runtime_create(THATCH_ABI_VERSION, &host, seed)"] --> load["thatch_runtime_load(rt, thatch_program_abi_version(), thatch_program_init)"]
-    load --> flag["thatch_runtime_green_flag(rt)"]
+    load --> stage["thatch_runtime_stage_width, thatch_runtime_stage_height and thatch_runtime_frame_rate: size the window and pace the frames"]
+    stage --> flag["thatch_runtime_green_flag(rt)"]
     flag --> frame["thatch_runtime_frame(rt)"]
     frame --> redraw{"thatch_runtime_redraw_requested(rt)?"}
     redraw -->|yes| draw["thatch_runtime_draw_order, then thatch_runtime_sprite for each target, and draw"] --> input
@@ -106,9 +107,24 @@ flowchart TD
     more -->|no| destroy["thatch_runtime_destroy(rt)"]
 ```
 
-When to stop is the host's call. A host with a window runs a frame every thirtieth of a second until the player closes it, scripts or no scripts, since a key press or a click can start a script at any time. The headless host has no player, so it stops once `thatch_runtime_has_threads` is false and no input from its script is still to come.
+### The stage and the frame rate
+
+How big the stage is and how fast it runs are values the runtime holds, not constants in the header, so a host asks for them after loading the program and never assumes Scratch's 480 by 360 at 30 frames per second:
+
+- `thatch_runtime_stage_width(rt)` and `thatch_runtime_stage_height(rt)` give the stage in Scratch units. The stage is centered on the origin, so x runs from minus half the width to half of it and y from minus half the height to half of it, y up.
+- `thatch_runtime_frame_rate(rt)` gives the frames per second. A host with a window calls `thatch_runtime_frame` that often.
+
+The runtime uses the same values for everything that depends on them: it clamps the mouse to the stage, picks the positions of `go to random position`, fences sprites, bounces them off the edges and limits their size with the stage size, and it moves the virtual clock by one frame of that rate and ends a frame after 75 percent of one. A host that lays out its window from these functions therefore cannot disagree with the runtime about where the edge of the stage is. Today every program gets Scratch's values; a project will be able to ask for others once the limits on the [roadmap](roadmap.md) are in. All three are fixed once a program is loaded.
+
+### When to stop
+
+When to stop is the host's call. A host with a window runs frames at the frame rate until the player closes it, scripts or no scripts, since a key press or a click can start a script at any time. The headless host has no player, so it stops once `thatch_runtime_has_threads` is false and no input from its script is still to come.
+
+### Drawing
 
 To draw, a host asks `thatch_runtime_draw_order` for the targets back to front (the stage first) and `thatch_runtime_sprite` for each one's `ThatchSprite`: position, direction and rotation style, size in percent, costume index (into the costumes the program registered, whose names `thatch_runtime_costume_count` and `thatch_runtime_costume_name` give back), visibility and the seven graphic effects in Scratch's order. The runtime keeps the direction as Scratch shows it, from -179 to 180 with 90 pointing right; the host applies the rotation style when it draws, as scratch-vm's renderer does.
+
+### Loading, errors and redraws
 
 `thatch_runtime_create` takes the ABI version the host was compiled with and returns null for any other, since a host built against another header passes a `ThatchHost` of another size. `thatch_runtime_load` returns `THATCH_LOAD_WRONG_ABI_VERSION` or `THATCH_LOAD_NO_STAGE` instead of `THATCH_LOAD_OK` when the program cannot run, and leaves the runtime as empty as it was created. A runtime holds one program, so a second load returns `THATCH_LOAD_ALREADY_LOADED` and changes nothing. `thatch_runtime_frame` returns nonzero after an error that `thatch_runtime_last_error` describes, after which the runtime may only be destroyed. `thatch_runtime_target_count`, `thatch_runtime_target_name` and `thatch_runtime_target_is_stage` describe the program's targets, so the `say` callback can name the sprite. A callback may call these and the other `thatch_runtime_*` functions that only read. Nothing is thread-safe: one runtime belongs to one thread, and the host may only call into it between frames and from its callbacks.
 
@@ -121,7 +137,7 @@ To draw, a host asks `thatch_runtime_draw_order` for the targets back to front (
 The host reports what the player does, between frames, and the runtime does what scratch-vm's keyboard and mouse devices do with it:
 
 - `thatch_runtime_key(rt, key, len, down)` for a key going down or up. The key is named as a browser's `KeyboardEvent.key` names it (`" "`, `"a"`, `"ArrowLeft"`, `"Enter"`); Scratch's own names (`space`, `left arrow`) work too. Modifier keys and anything else longer than one character are ignored, as in Scratch. A key going down starts the `when key pressed` hats for that key and for `any`, every time it is reported, so a key the system repeats while held starts them again, as in Scratch.
-- `thatch_runtime_mouse_move(rt, x, y)` with the pointer in Scratch coordinates (x from -240 to 240, y from -180 to 180, y up). The runtime rounds and clamps it, and ignores a NaN coordinate.
+- `thatch_runtime_mouse_move(rt, x, y)` with the pointer in Scratch coordinates (the origin in the middle of the stage, y up, so on Scratch's stage x runs from -240 to 240 and y from -180 to 180). The runtime rounds it and clamps it to the stage it reports, and ignores a NaN coordinate.
 - `thatch_runtime_mouse_button(rt, down, target, dragged)` for the button going down or up over `target`: the frontmost target under the pointer as the host sees it, the stage when no sprite is there, or -1 outside the stage. Only the host knows which sprite is under the pointer, since only it knows what it drew. A target that is not draggable is clicked as the button goes down; a draggable one (`thatch_runtime_target_draggable`) as it comes up, over whatever target the button comes up, as scratch-vm picks it. A host that lets the player drag sprites passes `dragged` for the release that ends a drag, which clicks nothing. Moving the dragged sprite is not in the API yet.
 
 The sensing blocks `mouse x`, `mouse y`, `mouse down?` and `key pressed?` read this state. A headless host has no input of its own; the one in `thatch-runtime` takes an input script instead (`--input`, see [getting started](getting-started.md)), which the oracle also understands, so the `input` sample checks keys, clicks and the hats they start against scratch-vm.
