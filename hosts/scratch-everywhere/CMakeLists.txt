@@ -2,12 +2,15 @@
 #
 # Builds the Thatch host on Scratch Everywhere!:
 #
-#   lib/libscratch-everywhere.{so,dylib}        the patched library (LGPL-3.0-or-later), shared, so
-#                                               that players can swap in a build of their own
+#   lib/libscratch-everywhere.{so,dylib}        the patched library (LGPL-3.0), shared, so that
+#                                               players can swap in a build of their own
 #   lib/libthatch_host_scratch_everywhere.a     the adapter, which owns main()
+#   lib/licenses.txt                            the license texts a game ships because of this host
+#   lib/thatch-host.txt                         what `thatch build --host` has to link and copy
 #
 # A game is the object file Thatch compiled, the adapter and libthatch_runtime.a linked together,
-# with the shared library and the game's .sb3 next to it. The test at the end builds one.
+# with the shared library and the game's .sb3 next to it. `thatch build --host scratch-everywhere`
+# makes one from the files above, and the test at the end does just that.
 #
 # The library is built from the ScratchEverywhere submodule with patches/host-hooks.patch applied
 # to a copy in the build directory; the submodule itself is never touched.
@@ -138,9 +141,22 @@ if(WIN32)
 endif()
 add_dependencies(thatch-host-scratch-everywhere scratch-everywhere)
 
-# The directories the library's build uses, one per line: every directory CMake entered for it,
-# and every include directory it compiles with. The libraries built into it are among them, which
-# is how the docs find their license notices.
+# ---- what `thatch build --host scratch-everywhere` reads -----------------------------------------
+
+# The description of this host: what to link and what to put next to a game.
+file(GENERATE OUTPUT "${HOST_LIB_DIR}/thatch-host.txt" CONTENT
+"# Written by the build of hosts/scratch-everywhere; read by `thatch build --host`.
+adapter = $<TARGET_FILE_NAME:thatch-host-scratch-everywhere>
+library = $<TARGET_FILE_NAME:scratch-everywhere>
+notices = licenses.txt
+linker = c++
+project = sb3
+")
+
+# The license texts a game has to ship because of this host: the LGPL and the GPL, where the
+# library's source is, and the notices of the libraries built into it. Those are found through
+# the directories the library's build uses: every directory CMake entered for it, and every
+# include directory it compiles with.
 function(thatch_collect_directories dir out)
     set(found "${dir}")
     get_property(children DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
@@ -155,8 +171,21 @@ list(JOIN SE_DIRECTORIES "\n" SE_DIRECTORY_LINES)
 set(SE_SOURCE_DIRS_FILE "${CMAKE_CURRENT_BINARY_DIR}/scratch-everywhere-dirs.txt")
 file(GENERATE OUTPUT "${SE_SOURCE_DIRS_FILE}" CONTENT
     "${SE_DIRECTORY_LINES}\n$<JOIN:$<TARGET_PROPERTY:scratch-everywhere,INCLUDE_DIRECTORIES>,\n>\n")
+add_custom_command(
+    OUTPUT "${HOST_LIB_DIR}/licenses.txt"
+    COMMAND "${CMAKE_COMMAND}"
+        "-DOUT=${HOST_LIB_DIR}/licenses.txt"
+        "-DSE_COMMIT=${SE_COMMIT}"
+        "-DSE_LICENSE=${SE_PATCHED}/LICENSE"
+        "-DGPL_TEXT=${CMAKE_CURRENT_SOURCE_DIR}/LICENSES/GPL-3.0.txt"
+        "-DPATCH=${SE_PATCH}"
+        "-DSOURCE_DIRS=${SE_SOURCE_DIRS_FILE}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/notices.cmake"
+    DEPENDS notices.cmake "${SE_PATCH}" LICENSES/GPL-3.0.txt "${SE_SOURCE_DIRS_FILE}"
+    VERBATIM)
 
-add_custom_target(thatch-host ALL DEPENDS scratch-everywhere thatch-host-scratch-everywhere)
+add_custom_target(thatch-host ALL DEPENDS
+    scratch-everywhere thatch-host-scratch-everywhere "${HOST_LIB_DIR}/licenses.txt")
 
 # ---- the test: a game built the way `thatch build` builds one -----------------------------------
 
@@ -180,46 +209,29 @@ if(BUILD_TESTING)
         set(TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/test")
         file(MAKE_DIRECTORY "${TEST_DIR}")
 
-        # The project as an .sb3, which the library reads the costumes from, and as an object
-        # file without main, which is the game's code.
+        # The project as an .sb3, and the game `thatch build --host` makes of it: the executable
+        # with the shared library, the project file and the license notices next to it.
         list(TRANSFORM TEST_PROJECT_FILES REPLACE "^.*/" "" OUTPUT_VARIABLE TEST_PROJECT_NAMES)
         add_custom_command(
-            OUTPUT "${TEST_DIR}/game.sb3"
-            COMMAND "${CMAKE_COMMAND}" -E tar cf "${TEST_DIR}/game.sb3" --format=zip ${TEST_PROJECT_NAMES}
+            OUTPUT "${TEST_DIR}/project.sb3"
+            COMMAND "${CMAKE_COMMAND}" -E tar cf "${TEST_DIR}/project.sb3" --format=zip ${TEST_PROJECT_NAMES}
             WORKING_DIRECTORY "${TEST_PROJECT}"
             DEPENDS ${TEST_PROJECT_FILES}
             VERBATIM)
         add_custom_command(
-            OUTPUT "${TEST_DIR}/game.o"
-            COMMAND "${THATCH_TARGET_DIR}/thatch" build "${TEST_DIR}/game.sb3" --object --no-main -o "${TEST_DIR}/game.o"
-            DEPENDS "${TEST_DIR}/game.sb3" "${THATCH_TARGET_DIR}/thatch"
+            OUTPUT "${TEST_DIR}/game" "${TEST_DIR}/game.sb3" "${TEST_DIR}/game.licenses.txt"
+            COMMAND "${THATCH_TARGET_DIR}/thatch" build "${TEST_DIR}/project.sb3"
+                --host scratch-everywhere --host-dir "${HOST_LIB_DIR}" -o "${TEST_DIR}/game"
+            DEPENDS "${TEST_DIR}/project.sb3" "${THATCH_TARGET_DIR}/thatch" "${THATCH_TARGET_DIR}/libthatch_runtime.a"
+                thatch-host "${HOST_LIB_DIR}/licenses.txt"
             VERBATIM)
-
-        add_executable(thatch-host-test-game "${TEST_DIR}/game.o")
-        set_target_properties(thatch-host-test-game PROPERTIES
-            LINKER_LANGUAGE CXX
-            OUTPUT_NAME game
-            RUNTIME_OUTPUT_DIRECTORY "${TEST_DIR}"
-            BUILD_RPATH "${HOST_LIB_DIR}")
-        set_source_files_properties("${TEST_DIR}/game.o" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
-        # What a Rust static library needs from the system, as `thatch build` links it.
-        if(APPLE)
-            set(THATCH_SYSTEM_LIBS iconv)
-        else()
-            set(THATCH_SYSTEM_LIBS gcc_s util rt pthread m dl c)
-        endif()
-        target_link_libraries(thatch-host-test-game PRIVATE
-            thatch-host-scratch-everywhere
-            scratch-everywhere
-            "${THATCH_TARGET_DIR}/libthatch_runtime.a"
-            ${THATCH_SYSTEM_LIBS})
-        add_custom_target(thatch-host-tests ALL DEPENDS thatch-host-test-game)
+        add_custom_target(thatch-host-tests ALL DEPENDS "${TEST_DIR}/game")
 
         add_test(
             NAME sprites_follow_the_runtime
             COMMAND "${CMAKE_COMMAND}"
-                "-DGAME=$<TARGET_FILE:thatch-host-test-game>"
-                "-DPROJECT=${TEST_DIR}/game.sb3"
+                "-DGAME=${TEST_DIR}/game"
+                "-DNOTICES=${TEST_DIR}/game.licenses.txt"
                 "-DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/tests/input.txt"
                 "-DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/tests/expected.txt"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run.cmake")

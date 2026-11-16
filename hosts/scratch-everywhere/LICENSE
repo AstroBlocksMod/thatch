@@ -22,11 +22,15 @@ comments, in a file of the same name with ".license" added.
 
 2. The Apache License 2.0 with LLVM exceptions, the license of the rest of Thatch
 
-   Everything else here: adapter/, tests/, CMakeLists.txt, README.md and this file
-   (SPDX: Apache-2.0 WITH LLVM-exception). The license text is ../../LICENSE.
+   Everything else here: adapter/, tests/, CMakeLists.txt, notices.cmake, README.md and this
+   file (SPDX: Apache-2.0 WITH LLVM-exception). The license text is ../../LICENSE.
 
    The adapter is the program that uses the library. It includes the library's headers and calls
    its functions, and it contains no code copied from the library.
+
+LICENSES/ holds the text of the GNU General Public License, version 3, which the build copies
+into the notices games ship. A license text is not itself a licensed work, so it has no SPDX
+line; the Free Software Foundation allows verbatim copies of it.
 
 Nothing outside this directory is derived from, includes or depends on anything inside it, and
 tools/check-hosts.sh, which CI runs, keeps it that way. This directory is not part of the Cargo

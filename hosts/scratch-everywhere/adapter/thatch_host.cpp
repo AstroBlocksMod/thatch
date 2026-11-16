@@ -32,6 +32,12 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
+
 #include <audio.hpp>
 #include <collision.hpp>
 #include <host_hooks.hpp>
@@ -500,6 +506,21 @@ bool readInputScript(const std::string &path, std::vector<ScriptedInput> &events
     return true;
 }
 
+/// Where this executable is, however it was started: by path, or by name through PATH, in which
+/// case `argv[0]` alone would not say. Falls back to `argv[0]` where the system cannot tell.
+std::string executablePath(const char *argv0) {
+#if defined(__APPLE__)
+    char buffer[4096];
+    uint32_t size = sizeof buffer;
+    if (_NSGetExecutablePath(buffer, &size) == 0) return buffer;
+#elif defined(__linux__)
+    char buffer[4096];
+    const ssize_t length = readlink("/proc/self/exe", buffer, sizeof buffer - 1);
+    if (length > 0) return std::string(buffer, static_cast<size_t>(length));
+#endif
+    return argv0;
+}
+
 /// Reads the command line. Returns false after printing what is wrong.
 bool parseArgs(int argc, char **argv, Options &options) {
     for (int i = 1; i < argc; i++) {
@@ -533,7 +554,7 @@ bool parseArgs(int argc, char **argv, Options &options) {
         }
     }
     // The project file lies next to the executable, under its name with .sb3 added.
-    if (options.project.empty()) options.project = std::string(argv[0]) + ".sb3";
+    if (options.project.empty()) options.project = executablePath(argv[0]) + ".sb3";
     return true;
 }
 

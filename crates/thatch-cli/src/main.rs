@@ -54,6 +54,17 @@ enum Cmd {
         /// the extension .licenses.txt in place of .a, where building the runtime puts them.
         #[arg(long)]
         runtime_lib: Option<PathBuf>,
+        /// Build the game for a host with a window instead of the headless one; `scratch-everywhere`
+        /// is the one there is. The project has to be an .sb3. Links the host's adapter, and puts
+        /// the host's shared library, the project file and the host's license texts next to the
+        /// executable.
+        #[arg(long, conflicts_with = "object")]
+        host: Option<String>,
+        /// Where the host's build output is: the directory with its thatch-host.txt. Defaults to
+        /// $THATCH_HOST_DIR, then hosts/HOST next to this executable, then the host's build
+        /// directory in a checkout of Thatch.
+        #[arg(long, requires = "host")]
+        host_dir: Option<PathBuf>,
     },
     /// Prints the IR of a project.
     Dump { project: PathBuf },
@@ -89,8 +100,9 @@ fn command(cli: Cli) -> anyhow::Result<()> {
             };
             run(&project, RunOptions { frames, timing, seed, input })
         }
-        Cmd::Build { project, output, object, no_main, runtime_lib } => {
-            build(&project, output, object, !no_main, runtime_lib)
+        Cmd::Build { project, output, object, no_main, runtime_lib, host, host_dir } => {
+            let host = host.map(|name| find_host(&name, host_dir)).transpose()?;
+            build(&project, output, object, !no_main, runtime_lib, host)
         }
         Cmd::Dump { project } => {
             let lowered = lower(&project)?;
@@ -137,15 +149,132 @@ fn system_libs() -> anyhow::Result<&'static [&'static str]> {
     })
 }
 
+/// A host with a window, as the `thatch-host.txt` in its build output describes it. `thatch`
+/// knows nothing else about a host: the file says what to link and what to put next to the game.
+///
+/// The file has one `key = value` per line, with `#` comments. Paths are relative to its
+/// directory.
+///
+/// ```text
+/// adapter = libthatch_host_scratch_everywhere.a
+/// library = libscratch-everywhere.so
+/// notices = licenses.txt
+/// linker = c++
+/// project = sb3
+/// ```
+struct Host {
+    name: String,
+    /// The static library with the host's `main` and its implementation of the host table.
+    adapter: PathBuf,
+    /// Shared libraries the adapter needs, which are linked and copied next to the executable.
+    libraries: Vec<PathBuf>,
+    /// The license texts the host adds to the notices.
+    notices: Option<PathBuf>,
+    /// The compiler driver to link with: `c++` for an adapter written in C++.
+    linker: String,
+    /// When the host reads the project file at run time: the extension to copy it under, next to
+    /// the executable.
+    project_extension: Option<String>,
+}
+
+/// Finds the build output of the host called `name` and reads its description.
+fn find_host(name: &str, dir: Option<PathBuf>) -> anyhow::Result<Host> {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        bail!("{name:?} is not the name of a host");
+    }
+    const MANIFEST: &str = "thatch-host.txt";
+    let mut candidates = Vec::new();
+    if let Some(dir) = dir {
+        candidates.push(dir);
+    } else if let Some(dir) = std::env::var_os("THATCH_HOST_DIR") {
+        candidates.push(PathBuf::from(dir));
+    } else if let Some(beside) = std::env::current_exe().ok().as_deref().and_then(Path::parent) {
+        // An installed thatch has its hosts next to it. In a checkout, thatch is
+        // target/<profile>/thatch and a host is built in hosts/<name>/build.
+        candidates.push(beside.join("hosts").join(name));
+        candidates.push(beside.join("../../hosts").join(name).join("build/lib"));
+    }
+    let Some(dir) = candidates.iter().find(|dir| dir.join(MANIFEST).is_file()) else {
+        let looked: Vec<String> = candidates.iter().map(|d| d.display().to_string()).collect();
+        bail!(
+            "the host {name} was not found: no {MANIFEST} in {}. Build the host first (see the docs), \
+             or point --host-dir or THATCH_HOST_DIR at its build output",
+            looked.join(" or ")
+        );
+    };
+    let manifest = dir.join(MANIFEST);
+    let text = std::fs::read_to_string(&manifest).with_context(|| format!("could not read {}", manifest.display()))?;
+    let mut host = Host {
+        name: name.to_owned(),
+        adapter: PathBuf::new(),
+        libraries: Vec::new(),
+        notices: None,
+        linker: "cc".to_owned(),
+        project_extension: None,
+    };
+    for (number, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let entry = line.split_once('=').map(|(key, value)| (key.trim(), value.trim()));
+        match entry {
+            Some(("adapter", value)) => host.adapter = dir.join(value),
+            Some(("library", value)) => host.libraries.push(dir.join(value)),
+            Some(("notices", value)) => host.notices = Some(dir.join(value)),
+            Some(("linker", value)) => host.linker = value.to_owned(),
+            Some(("project", value)) => host.project_extension = Some(value.to_owned()),
+            _ => bail!(
+                "{} line {}: expected adapter, library, notices, linker or project",
+                manifest.display(),
+                number + 1
+            ),
+        }
+    }
+    if host.adapter.as_os_str().is_empty() {
+        bail!("{} names no adapter", manifest.display());
+    }
+    for file in std::iter::once(&host.adapter).chain(&host.libraries).chain(&host.notices) {
+        if !file.is_file() {
+            bail!("{} names {}, which is not there; build the host again", manifest.display(), file.display());
+        }
+    }
+    Ok(host)
+}
+
+/// The linker option that makes an executable look for shared libraries in its own directory.
+fn rpath_beside_executable() -> &'static str {
+    if cfg!(target_os = "macos") { "-Wl,-rpath,@executable_path" } else { "-Wl,-rpath,$ORIGIN" }
+}
+
+/// `path` with `suffix` added to its whole file name, so that `game` and `game.exe` cannot collide.
+fn beside(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_owned();
+    name.push(suffix);
+    path.with_file_name(name)
+}
+
 fn build(
     project: &Path,
     output: Option<PathBuf>,
     object_only: bool,
     with_main: bool,
     runtime_lib: Option<PathBuf>,
+    host: Option<Host>,
 ) -> anyhow::Result<()> {
+    if let Some(host) = &host
+        && let Some(extension) = &host.project_extension
+        && project.extension().is_none_or(|e| !e.eq_ignore_ascii_case(extension.as_str()))
+    {
+        bail!(
+            "the {} host reads the project's costumes when the game runs, so it needs the project as an .{extension} file, not {}",
+            host.name,
+            project.display()
+        );
+    }
     let lowered = lower(project)?;
-    let bytes = thatch_codegen::compile_object(&lowered.program, with_main)?;
+    // A host brings its own main.
+    let bytes = thatch_codegen::compile_object(&lowered.program, with_main && host.is_none())?;
     let stem = project.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "program".to_owned());
     let output = output.unwrap_or_else(|| PathBuf::from(if object_only { format!("{stem}.o") } else { stem.clone() }));
     // Everything is written into a fresh private directory next to the output and moved into
@@ -163,35 +292,61 @@ fn build(
         return Ok(());
     }
     let runtime = find_runtime_lib(runtime_lib)?;
-    let notices = runtime_notices(&runtime)?;
+    let mut notices = runtime_notices(&runtime)?;
     let exe = work.path().join(&stem);
-    let status = Command::new("cc")
-        .arg("-o")
-        .arg(&exe)
-        .arg(&object)
-        .arg(&runtime.path)
+    let linker = host.as_ref().map_or("cc", |h| h.linker.as_str());
+    let mut link = Command::new(linker);
+    link.arg("-o").arg(&exe).arg(&object);
+    if let Some(host) = &host {
+        // The adapter comes before the runtime it calls, and the shared libraries after both.
+        link.arg(&host.adapter);
+    }
+    link.arg(&runtime.path);
+    if let Some(host) = host.as_ref().filter(|h| !h.libraries.is_empty()) {
+        link.args(&host.libraries).arg(rpath_beside_executable());
+    }
+    let status = link
         .args(system_libs()?)
         .status()
-        .context("could not run cc; a C compiler is needed to link")?;
+        .with_context(|| format!("could not run {linker}; a C compiler is needed to link"))?;
     if !status.success() {
         bail!("linking failed");
     }
-    // The notices go next to the executable, since whoever ships the one has to ship the other.
-    let notices_file = work.path().join("licenses.txt");
-    let notices_output = notices_path(&output);
-    std::fs::write(&notices_file, notices).with_context(|| format!("could not write {}", notices_output.display()))?;
-    std::fs::rename(&exe, &output).with_context(|| format!("could not write {}", output.display()))?;
-    std::fs::rename(&notices_file, &notices_output)
-        .with_context(|| format!("could not write {}", notices_output.display()))?;
-    Ok(())
-}
 
-/// Where the license notices of the executable `output` go: next to it, under its whole file name
-/// with `.licenses.txt` added, so that `game` and `game.exe` cannot collide.
-fn notices_path(output: &Path) -> PathBuf {
-    let mut name = output.file_name().unwrap_or_default().to_owned();
-    name.push(".licenses.txt");
-    output.with_file_name(name)
+    // What ships with the executable goes next to it. Everything is prepared in a directory of
+    // its own in the work directory first and then moved into place, the executable last.
+    let staging = work.path().join("ship");
+    std::fs::create_dir(&staging).with_context(|| format!("could not create {}", staging.display()))?;
+    let mut moves = Vec::new();
+    if let Some(host) = &host {
+        // The shared libraries the game loads from its own directory. Shipping them as separate
+        // files is also what lets a player replace one, which the LGPL asks for.
+        for library in &host.libraries {
+            let name = library.file_name().context("a host library has no file name")?;
+            let staged = staging.join(name);
+            std::fs::copy(library, &staged).with_context(|| format!("could not copy {}", library.display()))?;
+            moves.push((staged, output.with_file_name(name)));
+        }
+        if let Some(extension) = &host.project_extension {
+            let staged = staging.join(format!("project.{extension}"));
+            std::fs::copy(project, &staged).with_context(|| format!("could not copy {}", project.display()))?;
+            moves.push((staged, beside(&output, &format!(".{extension}"))));
+        }
+        if let Some(path) = &host.notices {
+            let text = std::fs::read_to_string(path).with_context(|| format!("could not read {}", path.display()))?;
+            notices.push_str("\n\n");
+            notices.push_str(&text);
+        }
+    }
+    // The notices: whoever ships the executable has to ship them too.
+    let notices_file = staging.join("licenses.txt");
+    std::fs::write(&notices_file, notices).context("could not write the license notices")?;
+    moves.push((notices_file, beside(&output, ".licenses.txt")));
+    moves.push((exe, output));
+    for (from, to) in moves {
+        std::fs::rename(&from, &to).with_context(|| format!("could not write {}", to.display()))?;
+    }
+    Ok(())
 }
 
 /// The runtime library to link.

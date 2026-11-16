@@ -172,6 +172,93 @@ fn a_build_writes_the_license_notices_next_to_the_executable() {
     assert!(!out_dir.path().join("hello.o.licenses.txt").exists());
 }
 
+fn run_ok(command: &mut Command, what: &str) {
+    let output = command.output().unwrap_or_else(|e| panic!("{what} did not start: {e}"));
+    assert!(output.status.success(), "{what} failed: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+/// `thatch build --host` knows a host only through the `thatch-host.txt` in its build output:
+/// which adapter to link, which shared libraries and license texts go next to the game, and
+/// whether the project file does too. This host is made up on the spot: its adapter is the C host
+/// of the test below, and its shared library does nothing but has to be found when the game starts.
+#[test]
+fn a_build_for_a_host_follows_the_hosts_description() {
+    let runtime_lib = runtime_lib();
+    let include = Path::new(env!("CARGO_MANIFEST_DIR")).join("../thatch-abi/include");
+    let host_c = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/c_host/host.c");
+    let host_dir = temp_out_dir("host");
+    let dir = host_dir.path();
+
+    let object = dir.join("host.o");
+    run_ok(Command::new("cc").arg("-c").arg("-I").arg(&include).arg("-o").arg(&object).arg(&host_c), "cc");
+    run_ok(Command::new("ar").arg("rcs").arg(dir.join("libadapter.a")).arg(&object), "ar");
+    let extra_c = dir.join("extra.c");
+    std::fs::write(&extra_c, "int thatch_test_extra(void) { return 7; }\n").expect("the source is written");
+    let (library, name_option) = if cfg!(target_os = "macos") {
+        ("libextra.dylib", "-Wl,-install_name,@rpath/libextra.dylib")
+    } else {
+        ("libextra.so", "-Wl,-soname,libextra.so")
+    };
+    run_ok(
+        Command::new("cc").arg("-shared").arg("-fPIC").arg(name_option).arg("-o").arg(dir.join(library)).arg(&extra_c),
+        "cc -shared",
+    );
+    std::fs::write(dir.join("notices.txt"), "The notices of the made-up host.\n").expect("the notices are written");
+    let manifest = format!(
+        "# a made-up host\nadapter = libadapter.a\nlibrary = {library}\nnotices = notices.txt\nlinker = cc\nproject = json\n"
+    );
+    std::fs::write(dir.join("thatch-host.txt"), &manifest).expect("the description is written");
+
+    let out_dir = temp_out_dir("host-game");
+    let project = samples_dir().join("hello").join("project.json");
+    let exe = out_dir.path().join("game");
+    let build = |project: &Path, host_dir: &Path| {
+        thatch()
+            .arg("build")
+            .arg(project)
+            .arg("--host")
+            .arg("made-up")
+            .arg("--host-dir")
+            .arg(host_dir)
+            .arg("--runtime-lib")
+            .arg(&runtime_lib)
+            .arg("-o")
+            .arg(&exe)
+            .output()
+            .expect("thatch builds")
+    };
+    let built = build(&project, dir);
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+
+    // The game is the adapter's main around the compiled program, and runs like the C host.
+    let output = Command::new(&exe).arg("--frames").arg("3000").output().expect("the game runs");
+    check_output("hello", "made-up host", &output);
+    // Next to it: the shared library, the project file under the game's name, and the notices of
+    // the runtime with the host's after them.
+    assert!(out_dir.path().join(library).is_file(), "the shared library is next to the game");
+    let copied = std::fs::read(out_dir.path().join("game.json")).expect("the project file is next to the game");
+    assert_eq!(copied, std::fs::read(&project).expect("the project"));
+    let notices = std::fs::read_to_string(out_dir.path().join("game.licenses.txt")).expect("the notices");
+    let runtime_notices = std::fs::read_to_string(runtime_lib.with_extension("licenses.txt")).expect("the runtime's");
+    assert_eq!(notices, format!("{runtime_notices}\n\nThe notices of the made-up host.\n"));
+
+    // A host that reads the project at run time needs it in the format it reads.
+    std::fs::write(dir.join("thatch-host.txt"), manifest.replace("project = json", "project = sb3"))
+        .expect("rewritten");
+    let refused = build(&project, dir);
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(!refused.status.success() && stderr.contains(".sb3 file"), "{stderr}");
+    // A host that was not built is an error that says where it was looked for.
+    let missing = build(&project, &dir.join("nowhere"));
+    let stderr = String::from_utf8_lossy(&missing.stderr);
+    assert!(!missing.status.success() && stderr.contains("thatch-host.txt") && stderr.contains("nowhere"), "{stderr}");
+    // So is a description that names a file that is not there.
+    std::fs::write(dir.join("thatch-host.txt"), "adapter = libgone.a\n").expect("rewritten");
+    let broken = build(&project, dir);
+    let stderr = String::from_utf8_lossy(&broken.stderr);
+    assert!(!broken.status.success() && stderr.contains("libgone.a"), "{stderr}");
+}
+
 #[test]
 fn samples_run_under_a_c_host() {
     let runtime_lib = runtime_lib();

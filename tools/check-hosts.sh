@@ -24,6 +24,9 @@ ALLOWED=(
     ".gitmodules"            # pins the submodules
     ".gitignore"             # ignores the hosts' build directories
     "tools/check-hosts.sh"   # this script
+    # `thatch build --host` looks for a host's build output by path. It reads the description the
+    # host's build wrote there and links what that names; it includes and builds nothing of a host.
+    "crates/thatch-cli/src/main.rs"
 )
 
 failed=0
@@ -48,6 +51,10 @@ while IFS= read -r entry; do
     mode=${entry%% *}
     file=${entry#*$'\t'}
     [ "$mode" = "160000" ] && continue
+    # The texts of licenses themselves, kept for the notices games ship, are not licensed works.
+    case "$file" in
+        hosts/*/LICENSES/*) continue ;;
+    esac
     if head -n 5 "$file" | grep -q "SPDX-License-Identifier: "; then
         continue
     fi

@@ -48,6 +48,17 @@ thatch build project.sb3 -o project
 
 writes an object file with Cranelift, then links it with `cc` against `libthatch_runtime.a`, which `thatch` looks for next to itself (`--runtime-lib` or `THATCH_RUNTIME_LIB` point it elsewhere). Next to the executable it writes `project.licenses.txt`, the license notices to ship with it (see below). The executable takes the same `--frames`, `--timing`, `--seed` and `--input` options as `thatch run`. `--object` writes only the object file, and `--object --no-main` writes one without `main`, for a host of your own that includes `thatch.h` and drives the program itself (see [the ABI](abi.md#writing-a-host); `crates/thatch-cli/tests/c_host/host.c` is a complete example).
 
+### A game with a window
+
+The executables above are headless: they print what sprites say. `thatch build --host scratch-everywhere` builds the same project as a game with a window instead, drawn by Scratch Everywhere!:
+
+```sh
+thatch build project.sb3 --host scratch-everywhere -o dist/project
+dist/project
+```
+
+The host has to be built first, and a game built with it ships a few more files and license texts. [The Scratch Everywhere! host](scratch-everywhere.md) has the steps.
+
 ### Licenses of a built executable
 
 You can ship what Thatch builds under any license you like. Thatch's own runtime is Apache-2.0 with LLVM exceptions, which asks nothing of the executables it ends up in. The libraries the runtime is built from do ask for one thing: they are under the MIT license or Apache-2.0 (your choice for each), and either one wants its license text to go along with the executable.

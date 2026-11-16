@@ -28,7 +28,7 @@ The headless host stays as the reference the samples check against, since Scratc
 - [x] `thatch build` writes the license texts a game has to ship next to the executable: Rust's standard library and every crate the runtime links, gathered when `libthatch_runtime.a` is built and kept beside it, with a test that fails when the list no longer matches the runtime's dependency tree. A host adds its own texts to the same file
 - [x] The [Scratch Everywhere! host](scratch-everywhere.md) in `hosts/scratch-everywhere/`: submodule, hook patch, adapter and the CI check that fences the directory off, built with their JIT and DECtalk off (the JIT starts background threads, and DECtalk's license is unclear), on Linux and macOS
 - [ ] The Scratch Everywhere! host on Windows
-- [ ] `thatch build --host scratch-everywhere`: links the game against the shared library and writes the license notices next to it
+- [x] `thatch build --host scratch-everywhere`: links the game against the shared library and writes the license notices next to it
 - [ ] Variables synced to Scratch Everywhere!'s copies so its monitors show them
 - [ ] Pen
 - [ ] The sensing blocks that need a stage: touching, touching color, distance to, ask, and dragging sprites (the host can already say that a release ended a drag; moving the sprite while it is dragged is what is missing)
