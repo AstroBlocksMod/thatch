@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -86,15 +87,13 @@ struct Host {
     std::vector<std::string> keysDown;
     std::unordered_map<std::string, uint64_t> keyHeld;
     bool mouseDown = false;
-    /// The input script: what is left of it, the keys it holds down, and its mouse, which stands
-    /// in for the real one from its first mouse event on.
+    /// The input script: what is left of it, and its mouse, which stands in for the real one from
+    /// its first mouse event on.
     std::vector<ScriptedInput> script;
     size_t nextScripted = 0;
-    std::vector<std::string> scriptKeys;
     bool scriptMouse = false;
     double scriptMouseX = 0;
     double scriptMouseY = 0;
-    bool scriptMouseDown = false;
     bool printBubbles = false;
     Clock::time_point started = Clock::now();
 };
@@ -260,13 +259,17 @@ void hostStartHat(void *, Sprite *, Block *, bool) {
 /// that are hidden or fully ghosted do not count, the stage is under everything, and a point
 /// outside the stage hits nothing (-1).
 int64_t targetAt(Host &host, double x, double y) {
-    if (std::abs(x) > thatch_runtime_stage_width(host.rt) / 2 || std::abs(y) > thatch_runtime_stage_height(host.rt) / 2) {
+    // A point that is not a number is on no stage; the comparisons below would let it through.
+    if (!std::isfinite(x) || !std::isfinite(y) || std::abs(x) > thatch_runtime_stage_width(host.rt) / 2 ||
+        std::abs(y) > thatch_runtime_stage_height(host.rt) / 2) {
         return -1;
     }
-    // The library keeps its sprites front to back.
+    // The library keeps its sprites front to back, so every sprite in front of this one was
+    // tested already. Its click mode also tests the sprite in front, but counts hidden ones,
+    // which would let a hidden sprite block a click, so it is not used.
     for (Sprite *sprite : Scratch::sprites) {
         if (sprite->isStage || !sprite->visible || sprite->ghostEffect >= 100.0f) continue;
-        const bool hit = Scratch::accurateCollision ? collision::pointInSprite(sprite, x, y, true)
+        const bool hit = Scratch::accurateCollision ? collision::pointInSprite(sprite, x, y)
                                                     : collision::pointInSpriteFast(sprite, x, y);
         if (!hit) continue;
         const auto found = host.targets.find(sprite);
@@ -275,32 +278,35 @@ int64_t targetAt(Host &host, double x, double y) {
     return host.stage;
 }
 
-/// Plays the events of the input script that are due before `frame`.
+/// Plays the events of the input script that are due before `frame`, each one in turn, as the
+/// headless host does: two events for the same key in one frame are two events, and the runtime
+/// names the keys, so "left arrow" releases what "ArrowLeft" pressed. A key held by the script
+/// does not repeat, as it does not in the headless host.
 void playScript(Host &host, uint64_t frame) {
     while (host.nextScripted < host.script.size() && host.script[host.nextScripted].frame <= frame) {
         const ScriptedInput &event = host.script[host.nextScripted++];
         switch (event.kind) {
-        case ScriptedInput::Key: {
-            const auto held = std::find(host.scriptKeys.begin(), host.scriptKeys.end(), event.key);
-            if (event.down && held == host.scriptKeys.end()) host.scriptKeys.push_back(event.key);
-            if (!event.down && held != host.scriptKeys.end()) host.scriptKeys.erase(held);
+        case ScriptedInput::Key:
+            thatch_runtime_key(host.rt, event.key.data(), event.key.size(), event.down ? 1 : 0);
             break;
-        }
         case ScriptedInput::MouseMove:
+            // From the script's first mouse event on, it is the mouse.
             host.scriptMouse = true;
             host.scriptMouseX = event.x;
             host.scriptMouseY = event.y;
+            thatch_runtime_mouse_move(host.rt, event.x, event.y);
             break;
         case ScriptedInput::MouseButton:
             host.scriptMouse = true;
-            host.scriptMouseDown = event.down;
+            host.mouseDown = event.down;
+            thatch_runtime_mouse_button(host.rt, event.down ? 1 : 0, targetAt(host, host.scriptMouseX, host.scriptMouseY), 0);
             break;
         }
     }
 }
 
-/// Tells the Thatch runtime what the player did since the last frame: the state the library
-/// polled, with the input script on top.
+/// Tells the Thatch runtime what the player did since the last frame: the events of the input
+/// script, then the changes in the state the library polled.
 void reportInput(Host &host, uint64_t frame) {
     playScript(host, frame);
 
@@ -308,9 +314,6 @@ void reportInput(Host &host, uint64_t frame) {
     std::vector<std::string> keys;
     for (const std::string &key : Input::inputKeys) {
         if (key != "any") keys.push_back(key);
-    }
-    for (const std::string &key : host.scriptKeys) {
-        if (std::find(keys.begin(), keys.end(), key) == keys.end()) keys.push_back(key);
     }
     for (const std::string &key : host.keysDown) {
         if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
@@ -329,17 +332,22 @@ void reportInput(Host &host, uint64_t frame) {
     }
     host.keysDown = std::move(keys);
 
-    const double x = host.scriptMouse ? host.scriptMouseX : Input::mousePointer.x;
-    const double y = host.scriptMouse ? host.scriptMouseY : Input::mousePointer.y;
-    thatch_runtime_mouse_move(host.rt, x, y);
-    const bool down = host.scriptMouse ? host.scriptMouseDown : Input::mousePointer.isPressed;
-    if (down != host.mouseDown) {
-        host.mouseDown = down;
-        thatch_runtime_mouse_button(host.rt, down ? 1 : 0, targetAt(host, x, y), 0);
+    // The real mouse, unless the script has taken it over.
+    if (!host.scriptMouse) {
+        const double x = Input::mousePointer.x;
+        const double y = Input::mousePointer.y;
+        thatch_runtime_mouse_move(host.rt, x, y);
+        const bool down = Input::mousePointer.isPressed;
+        if (down != host.mouseDown) {
+            host.mouseDown = down;
+            thatch_runtime_mouse_button(host.rt, down ? 1 : 0, targetAt(host, x, y), 0);
+        }
     }
 
-    // The library starts dragging a draggable sprite by itself and moves its own copy. The
-    // runtime knows nothing of that yet, so the drag is undone before it shows.
+    // The library starts dragging a draggable sprite by itself and moves its own copy. Dragging is
+    // not in the host table yet, so the drag is undone before it shows. Since no drag ever happens,
+    // every release is reported as one that ends no drag, and a draggable sprite's release counts
+    // as its click, as in Scratch when the mouse did not move it.
     if (Input::draggingSprite != nullptr) {
         const auto found = host.targets.find(Input::draggingSprite);
         if (found != host.targets.end()) markChanged(host, found->second);
@@ -370,7 +378,15 @@ bool pairTargets(Host &host) {
             std::fprintf(stderr, "error: the project file has no %s named \"%s\"\n", isStage ? "stage" : "sprite", wanted.c_str());
             return false;
         }
-        if (static_cast<int64_t>(sprite->costumes.size()) != thatch_runtime_costume_count(host.rt, target)) {
+        // Costumes are shown by index, so the project file has to have the program's, by name and
+        // in the same order.
+        bool sameCostumes = static_cast<int64_t>(sprite->costumes.size()) == thatch_runtime_costume_count(host.rt, target);
+        for (size_t costume = 0; sameCostumes && costume < sprite->costumes.size(); costume++) {
+            size_t nameLen = 0;
+            const char *costumeName = thatch_runtime_costume_name(host.rt, target, static_cast<int64_t>(costume), &nameLen);
+            sameCostumes = costumeName != nullptr && sprite->costumes[costume].name == std::string(costumeName, nameLen);
+        }
+        if (!sameCostumes) {
             std::fprintf(stderr, "error: \"%s\" has other costumes in the project file than in the program\n", wanted.c_str());
             return false;
         }
@@ -379,10 +395,14 @@ bool pairTargets(Host &host) {
     return true;
 }
 
+/// A whole number from 0 up, in decimal digits and nothing else. `strtoull` alone would take "-1"
+/// (as the largest number there is) and quietly cap one that is too big.
 bool parseNumber(const char *text, uint64_t &out) {
+    if (text[0] < '0' || text[0] > '9') return false;
     char *end = nullptr;
+    errno = 0;
     out = std::strtoull(text, &end, 10);
-    return end != text && *end == '\0';
+    return errno == 0 && *end == '\0';
 }
 
 /// The first word of `line` from `pos` on, which is moved past it and the spaces after it.
@@ -441,7 +461,9 @@ bool readInputScript(const std::string &path, std::vector<ScriptedInput> &events
                 char *endY = nullptr;
                 event.x = std::strtod(first.c_str(), &endX);
                 event.y = std::strtod(second.c_str(), &endY);
-                ok = ok && !first.empty() && !second.empty() && *endX == '\0' && *endY == '\0' && pos == line.size();
+                // strtod also reads "nan" and "inf", which are no place on the stage.
+                ok = ok && !first.empty() && !second.empty() && *endX == '\0' && *endY == '\0' && pos == line.size() &&
+                     std::isfinite(event.x) && std::isfinite(event.y);
             }
         } else {
             ok = false;

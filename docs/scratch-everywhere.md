@@ -57,16 +57,19 @@ hosts/scratch-everywhere/build/test/game hosts/scratch-everywhere/build/test/gam
 A game for this host is four things linked together: the object file of the compiled program without `main`, the adapter, the Thatch runtime and the shared library.
 
 ```sh
-thatch build game.sb3 --object --no-main -o game.o
-c++ -o game game.o \
+mkdir -p dist
+thatch build game.sb3 --object --no-main -o dist/game.o
+c++ -o dist/game dist/game.o \
     hosts/scratch-everywhere/build/lib/libthatch_host_scratch_everywhere.a \
     target/debug/libthatch_runtime.a \
     -Lhosts/scratch-everywhere/build/lib -lscratch-everywhere \
-    -Wl,-rpath,hosts/scratch-everywhere/build/lib
-./game game.sb3
+    -Wl,-rpath,@executable_path        # on Linux: -Wl,-rpath,'$ORIGIN'
+cp hosts/scratch-everywhere/build/lib/libscratch-everywhere.* game.sb3 dist/
+cp target/debug/libthatch_runtime.licenses.txt dist/game.licenses.txt
+dist/game dist/game.sb3
 ```
 
-On Linux add the libraries the runtime needs from the system: `-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc`; on macOS, `-liconv`. `thatch build --host scratch-everywhere` will do all of this in one step; it is the next item on the roadmap.
+The rpath makes the game look for the library in its own directory, wherever it is started from, so the library is copied next to it. The runtime's license notices go along too (see [getting started](getting-started.md#licenses-of-a-built-executable)), and so do the host's own (see [Licenses](#licenses)). On Linux add the libraries the runtime needs from the system: `-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc`; on macOS, `-liconv`. `thatch build --host scratch-everywhere` will do all of this in one step; it is the next item on the roadmap.
 
 The game takes the project file as its argument, since the costumes are read from it at run time. Without an argument it looks for a file named like the executable with `.sb3` added. `--frames N` stops after N frames, `--seed N` seeds `pick random`, `--print-bubbles` also prints every bubble as the headless host does, and `--input FILE` plays a script of key and mouse events in the format of `thatch run --input` on top of the real keyboard and mouse.
 
