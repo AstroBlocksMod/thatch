@@ -72,6 +72,15 @@ fn every_linked_crate_is_taken_under_a_permissive_license_it_offers() {
 }
 
 #[test]
+fn the_library_directory_is_found_in_both_cargo_layouts() {
+    let dir = |p: &str| notices::artifact_dir(Path::new(p));
+    // Cargo 1.99 and older, then 1.100 and newer.
+    assert_eq!(dir("/t/debug/build/thatch-runtime-0123abcd/out"), Some("/t/debug".into()));
+    assert_eq!(dir("/t/debug/build/thatch-runtime/0123abcd/out"), Some("/t/debug".into()));
+    assert_eq!(dir("/elsewhere/out"), None);
+}
+
+#[test]
 fn spdx_expressions_are_read_conservatively() {
     assert!(offers("MIT OR Apache-2.0", "MIT"));
     assert!(offers("Apache-2.0 OR BSL-1.0", "BSL-1.0"));
@@ -86,7 +95,17 @@ fn spdx_expressions_are_read_conservatively() {
 #[test]
 fn the_built_notices_cover_what_this_platform_links() {
     let notices = thatch_runtime::LICENSE_NOTICES;
-    assert!(!notices.contains("THIS FILE IS INCOMPLETE"), "{}", &notices[..notices.len().min(2000)]);
+    // Complete, except where the toolchain came without the standard library's notices, which the
+    // file then says and which is the one gap a build may have.
+    let head = &notices[..notices.len().min(2000)];
+    if thatch_runtime::LICENSE_NOTICES_LACK_RUST {
+        assert!(head.starts_with("THIS FILE IS INCOMPLETE"), "{head}");
+        let gaps = head.split("\n\n").nth(1).unwrap_or_default();
+        assert_eq!(gaps.lines().count(), 1, "the standard library is the only gap: {head}");
+        assert!(gaps.contains("Rust standard library"), "{head}");
+    } else {
+        assert!(!notices.contains("THIS FILE IS INCOMPLETE"), "{head}");
+    }
     // corosensei is linked everywhere; its MIT text names its author.
     assert!(notices.contains("\ncorosensei "), "the crate has a section");
     assert!(notices.contains("Amanieu d'Antras"), "with its copyright line");

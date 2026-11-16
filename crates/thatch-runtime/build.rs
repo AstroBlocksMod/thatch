@@ -30,6 +30,11 @@ fn main() {
     let out_dir = PathBuf::from(env("OUT_DIR"));
     let target = env("TARGET");
     let mut missing = Vec::new();
+    // The dependency tree is in the lock file. It is watched whether or not listing it works this
+    // time, so that a build that could not list it runs this script again once the lock changes.
+    if let Some(lock) = manifest_dir.ancestors().map(|d| d.join("Cargo.lock")).find(|p| p.is_file()) {
+        println!("cargo::rerun-if-changed={}", lock.display());
+    }
 
     // Offline first: everything this build links was already downloaded for it, and a build script
     // should not reach for the network without need. `cargo metadata` also wants the manifests of
@@ -51,6 +56,11 @@ fn main() {
         }
     };
     let rust = sysroot().and_then(|sysroot| notices::rust_notices(&sysroot, &target));
+    // A toolchain from somewhere other than rustup may lack the standard library's notices. The
+    // file then says so, and the crate says so too, for the tests.
+    if rust.is_err() {
+        println!("cargo::rustc-env=THATCH_NOTICES_LACK_RUST=1");
+    }
     let gathered = notices::notices(&target, &packages, rust);
     missing.extend(gathered.missing);
     let mut text = gathered.text;
@@ -68,13 +78,33 @@ fn main() {
     }
 
     std::fs::write(out_dir.join("licenses.txt"), &text).expect("OUT_DIR is writable");
-    if let Some(dir) = artifact_dir(&out_dir) {
-        let name = if env("CARGO_CFG_TARGET_ENV") == "msvc" { "thatch_runtime" } else { "libthatch_runtime" };
-        let path = dir.join(format!("{name}.licenses.txt"));
-        if let Err(e) = std::fs::write(&path, &text) {
-            println!("cargo::warning=could not write {}: {e}", path.display());
+    let name = if env("CARGO_CFG_TARGET_ENV") == "msvc" { "thatch_runtime" } else { "libthatch_runtime" };
+    match notices::artifact_dir(&out_dir) {
+        Some(dir) => {
+            let path = dir.join(format!("{name}.licenses.txt"));
+            if let Err(e) = write_whole(&path, &text) {
+                println!("cargo::warning=could not write {}: {e}", path.display());
+            }
         }
+        None => println!(
+            "cargo::warning=the directory of {name} could not be worked out from OUT_DIR ({}), so its license notices \
+             are not written next to it; thatch build uses the notices built into thatch instead",
+            out_dir.display()
+        ),
     }
+}
+
+/// Writes `text` to `path` so that a reader sees the old file or the whole new one, never a part:
+/// into a file beside it first, then renamed over it. On failure nothing is left half written,
+/// and a sidecar that cannot be replaced is removed rather than left stale.
+fn write_whole(path: &Path, text: &str) -> std::io::Result<()> {
+    let partial = path.with_extension("txt.partial");
+    let result = std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+        let _ = std::fs::remove_file(path);
+    }
+    result
 }
 
 /// The sysroot of the compiler this build uses, which holds the standard library's notices.
@@ -88,12 +118,4 @@ fn sysroot() -> Result<PathBuf, String> {
         return Err(format!("{rustc} --print sysroot failed"));
     }
     Ok(PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
-}
-
-/// The directory cargo puts `libthatch_runtime.a` in, worked out from `OUT_DIR`, which is
-/// `<artifact dir>/build/<package>-<hash>/out` in cargo's layout. Cargo has no official way to ask,
-/// so with any other layout this is None, and `thatch build` falls back to the embedded notices.
-fn artifact_dir(out_dir: &Path) -> Option<PathBuf> {
-    let build = out_dir.parent()?.parent()?;
-    (build.file_name()? == "build").then(|| build.parent().map(Path::to_owned))?
 }

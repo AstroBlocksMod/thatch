@@ -281,8 +281,24 @@ pub fn rust_notices(sysroot: &Path, target: &str) -> Result<String, String> {
     Ok(html_to_text(&keep_linked_crates(&html, &crates)))
 }
 
-/// The names of the crates whose libraries are in a sysroot's library directory, as the files spell
-/// them (`cfg_if` for `libcfg_if-0123abcd.rlib`).
+/// The directory cargo puts `libthatch_runtime.a` in, worked out from the build script's `OUT_DIR`:
+/// the parent of the nearest directory above it named `build`. That is
+/// `<artifact dir>/build/<package>-<hash>/out` up to Cargo 1.99 and
+/// `<artifact dir>/build/<package>/<hash>/out` from 1.100 on. Cargo has no official way to ask, so
+/// with any other layout this is None, and `thatch build` falls back to the embedded notices.
+pub fn artifact_dir(out_dir: &Path) -> Option<PathBuf> {
+    // At most two levels between `out` and `build`.
+    let build = out_dir.ancestors().skip(1).take(3).find(|d| d.file_name().is_some_and(|n| n == "build"))?;
+    build.parent().map(Path::to_owned)
+}
+
+/// Libraries a sysroot ships that no program Thatch builds links: the test harness and what it
+/// needs (`test`, `getopts`), procedural macro support (`proc_macro` and its
+/// `rustc_literal_escaper`), and the profiler runtime, which only instrumented builds link.
+const NOT_LINKED: &[&str] = &["test", "getopts", "proc_macro", "rustc_literal_escaper", "profiler_builtins"];
+
+/// The names of the crates whose libraries are in a sysroot's library directory and can end up in
+/// a program, as the files spell them (`cfg_if` for `libcfg_if-0123abcd.rlib`).
 fn sysroot_crates(lib_dir: &Path) -> BTreeSet<String> {
     std::fs::read_dir(lib_dir)
         .into_iter()
@@ -293,6 +309,7 @@ fn sysroot_crates(lib_dir: &Path) -> BTreeSet<String> {
             let name = name.strip_prefix("lib")?.strip_suffix(".rlib")?;
             Some(name.rsplit_once('-').map_or(name, |(name, _hash)| name).to_owned())
         })
+        .filter(|name| !NOT_LINKED.contains(&name.as_str()))
         .collect()
 }
 

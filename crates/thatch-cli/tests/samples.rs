@@ -121,7 +121,9 @@ fn a_build_writes_the_license_notices_next_to_the_executable() {
     let gathered = std::fs::read_to_string(runtime_lib.with_extension("licenses.txt"))
         .expect("building the runtime writes its notices next to the library");
     assert!(gathered.contains("corosensei") && gathered.contains("The Rust standard library"), "{gathered}");
-    assert!(!gathered.contains("THIS FILE IS INCOMPLETE"), "{gathered}");
+    // A toolchain without the standard library's notices is the one gap the file may have; the
+    // runtime's own tests check what it says then.
+    assert!(thatch_runtime::LICENSE_NOTICES_LACK_RUST || !gathered.contains("THIS FILE IS INCOMPLETE"), "{gathered}");
 
     let out_dir = temp_out_dir("notices");
     let project = samples_dir().join("hello").join("project.json");
