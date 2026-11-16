@@ -60,7 +60,22 @@ impl Stage {
     /// How long a frame may step threads before it ends: 75 percent of a frame, scratch-vm's
     /// `WORK_TIME`.
     fn work_time(self) -> Duration {
-        Duration::from_secs_f64(0.75 / self.frame_rate)
+        // `Runtime::set_stage` only accepts rates for which this is a nonzero duration.
+        Duration::try_from_secs_f64(0.75 / self.frame_rate).unwrap_or(Duration::from_millis(25))
+    }
+
+    /// Whether the stage can be: a positive, finite size, and a frame rate whose work time is a
+    /// duration greater than zero, so that a frame neither panics nor ends after one pass.
+    fn is_valid(self) -> bool {
+        let positive = [self.width, self.height, self.frame_rate].iter().all(|v| v.is_finite() && *v > 0.0);
+        positive && Duration::try_from_secs_f64(0.75 / self.frame_rate).is_ok_and(|d| !d.is_zero())
+    }
+
+    /// `value` rounded as scratch-vm rounds a coordinate and kept within `-half..=half`. The clamp
+    /// comes after the rounding too, so that a stage of a fractional size cannot round a point
+    /// past its edge; for Scratch's whole-numbered stage the result is scratch-vm's.
+    pub(crate) fn round_into(value: f64, half: f64) -> f64 {
+        thatch_values::clamp(thatch_values::round(thatch_values::clamp(value, -half, half)), -half, half)
     }
 }
 
@@ -201,14 +216,16 @@ impl Runtime {
 
     /// Gives the stage another size or frame rate than Scratch's. Only before a program is loaded,
     /// since hosts read the values once after loading and the virtual clock counts in frames; a
-    /// later call changes nothing and returns false, and so does a size or rate that is not a
-    /// positive finite number.
+    /// later call changes nothing and returns false, and so does a size that is not a positive
+    /// finite number or a frame rate too high or too low to time a frame with. The mouse is moved
+    /// onto the new stage if it was off it.
     pub fn set_stage(&mut self, stage: Stage) -> bool {
-        let valid = [stage.width, stage.height, stage.frame_rate].iter().all(|v| v.is_finite() && *v > 0.0);
-        if self.loaded || !valid {
+        if self.loaded || !stage.is_valid() {
             return false;
         }
         self.stage = stage;
+        self.mouse_x = Stage::round_into(self.mouse_x, stage.width / 2.0);
+        self.mouse_y = Stage::round_into(self.mouse_y, stage.height / 2.0);
         true
     }
 

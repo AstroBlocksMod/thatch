@@ -1378,6 +1378,10 @@ mod tests {
             // A stage or a frame rate that cannot be is refused and changes nothing.
             assert!(!(*r).set_stage(Stage { width: 0.0, height: 360.0, frame_rate: 30.0 }));
             assert!(!(*r).set_stage(Stage { width: 480.0, height: 360.0, frame_rate: f64::NAN }));
+            // A frame rate whose work time no duration can hold, and one whose work time rounds
+            // to nothing, so that every frame would end after its first pass.
+            assert!(!(*r).set_stage(Stage { width: 480.0, height: 360.0, frame_rate: 1e-30 }));
+            assert!(!(*r).set_stage(Stage { width: 480.0, height: 360.0, frame_rate: 1e30 }));
             assert_eq!(thatch_runtime_stage_width(rt), 480.0);
             assert!((*r).set_stage(Stage { width: 640.0, height: 400.0, frame_rate: 50.0 }));
             assert_eq!(

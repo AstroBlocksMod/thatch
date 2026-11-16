@@ -75,8 +75,9 @@ impl Runtime {
         match name {
             "_mouse_" => Some((self.mouse_x, self.mouse_y)),
             "_random_" => {
-                let x = round(self.stage.width * (self.random() - 0.5));
-                let y = round(self.stage.height * (self.random() - 0.5));
+                let (half_w, half_h) = (self.stage.width / 2.0, self.stage.height / 2.0);
+                let x = Stage::round_into(self.stage.width * (self.random() - 0.5), half_w);
+                let y = Stage::round_into(self.stage.height * (self.random() - 0.5), half_h);
                 Some((x, y))
             }
             _ => {

@@ -6,9 +6,9 @@
 //! it knows what it drew.
 
 use thatch_abi::{HAT_KEY, HAT_SPRITE_CLICKED, HAT_STAGE_CLICKED};
-use thatch_values::{ValueRef, clamp, round, to_string};
+use thatch_values::{ValueRef, to_string};
 
-use crate::scheduler::Runtime;
+use crate::scheduler::{Runtime, Stage};
 
 /// The keys Scratch names rather than spells.
 const KEY_NAMES: [&str; 6] = ["space", "left arrow", "up arrow", "right arrow", "down arrow", "enter"];
@@ -89,10 +89,10 @@ impl Runtime {
     pub fn mouse_move(&mut self, x: f64, y: f64) {
         let (half_w, half_h) = (self.stage.width / 2.0, self.stage.height / 2.0);
         if !x.is_nan() {
-            self.mouse_x = round(clamp(x, -half_w, half_w));
+            self.mouse_x = Stage::round_into(x, half_w);
         }
         if !y.is_nan() {
-            self.mouse_y = round(clamp(y, -half_h, half_h));
+            self.mouse_y = Stage::round_into(y, half_h);
         }
     }
 
@@ -181,6 +181,14 @@ mod tests {
             assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (320.0, 100.0));
             (*rt).mouse_move(-300.0, -150.0);
             assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (-300.0, -100.0));
+            // A smaller stage moves a mouse that was off it back onto it.
+            assert!((*rt).set_stage(Stage { width: 100.0, height: 50.0, frame_rate: 60.0 }));
+            assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (-50.0, -25.0));
+            // At the edge of a stage of a fractional size, rounding does not leave the stage:
+            // -40.7 would round to -41, which is past the edge.
+            assert!((*rt).set_stage(Stage { width: 81.4, height: 50.0, frame_rate: 60.0 }));
+            (*rt).mouse_move(-1000.0, 0.0);
+            assert_eq!((*rt).mouse_x, -40.7);
             Runtime::destroy(rt);
         }
     }
