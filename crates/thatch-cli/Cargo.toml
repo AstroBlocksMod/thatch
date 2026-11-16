@@ -21,6 +21,7 @@ thatch-scratch.workspace = true
 
 [dev-dependencies]
 thatch-abi.workspace = true
+zip.workspace = true
 
 [lints]
 workspace = true

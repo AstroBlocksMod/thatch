@@ -22,9 +22,17 @@ Running `target/release/thatch` directly works too. Keep the three files togethe
 thatch run project.sb3
 ```
 
-compiles the project in memory and runs it headless: the scripts run as they would after a click on the green flag, with a virtual clock that advances a thirtieth of a second per frame, and everything a sprite says is printed as `Sprite says: text`. The run ends when no script is left, or after `--frames N` frames. `--timing` prints the frame count and wall time to stderr, and `--seed N` makes `pick random` repeatable.
+opens the project in a window, drawn by [Scratch Everywhere!](scratch-everywhere.md), and runs it as a click on the green flag would, until you close the window or `--frames N` frames have run. Behind the scenes it builds the game as `thatch build` does (see below) into a temporary directory, starts it from there and removes the directory when the game ends. `--seed N` makes `pick random` repeatable, and `--input FILE` plays the input script described below on top of the real keyboard and mouse.
 
-`thatch run` also takes a bare `project.json`.
+The Scratch Everywhere! host has to be built and installed once for that; [its page](scratch-everywhere.md#building-the-host) has the steps. Until it is, `thatch run` runs the project headless, as below, and prints a note that says so. A `thatch` installed with `cargo install` comes without the host, so that is what it does out of the box.
+
+### Running headless
+
+```sh
+thatch run --host headless project.sb3
+```
+
+compiles the project in memory and runs it without a window: the scripts run with a virtual clock that advances a thirtieth of a second per frame, and everything a sprite says is printed as `Sprite says: text`. The run ends when no script is left, or after `--frames N` frames. `--timing` prints the frame count and wall time to stderr. This is what the samples are checked with, and it needs nothing but `thatch` itself. It also takes a bare `project.json`, which has no costumes for a window to show.
 
 A headless run has no keyboard or mouse, so `--input FILE` plays one from a script: one event per line, each starting with the frame it happens before.
 
@@ -42,22 +50,24 @@ A headless run has no keyboard or mouse, so `--input FILE` plays one from a scri
 ## Building an executable
 
 ```sh
-thatch build project.sb3 -o project
-./project --frames 300
-```
-
-writes an object file with Cranelift, then links it with `cc` against `libthatch_runtime.a`, which `thatch` looks for next to itself (`--runtime-lib` or `THATCH_RUNTIME_LIB` point it elsewhere). Next to the executable it writes `project.licenses.txt`, the license notices to ship with it (see below). The executable takes the same `--frames`, `--timing`, `--seed` and `--input` options as `thatch run`. `--object` writes only the object file, and `--object --no-main` writes one without `main`, for a host of your own that includes `thatch.h` and drives the program itself (see [the ABI](abi.md#writing-a-host); `crates/thatch-cli/tests/c_host/host.c` is a complete example).
-
-### A game with a window
-
-The executables above are headless: they print what sprites say. `thatch build --host scratch-everywhere` builds the same project as a game with a window instead, drawn by Scratch Everywhere!:
-
-```sh
-thatch build project.sb3 --host scratch-everywhere -o dist/project
+thatch build project.sb3 -o dist/project
 dist/project
 ```
 
-The host has to be built first, and a game built with it ships a few more files and license texts. [The Scratch Everywhere! host](scratch-everywhere.md) has the steps.
+builds the project as a game with a window, drawn by Scratch Everywhere!. Next to the executable go the files it needs to run and to be shipped: the Scratch Everywhere! library, a copy of the project for its costumes, and `project.licenses.txt` with the license notices (see below). [The Scratch Everywhere! host](scratch-everywhere.md) describes them.
+
+`--host headless` builds an executable without a window instead, which prints what sprites say:
+
+```sh
+thatch build --host headless project.sb3 -o project
+./project --frames 300
+```
+
+It needs only `thatch` and `libthatch_runtime.a`, and writes just the executable and its `project.licenses.txt`. Like `thatch run`, `thatch build` builds headless with a note when the host is not installed, and a bare `project.json`, which has no costumes, is always built headless.
+
+`thatch` looks for `libthatch_runtime.a` next to itself, which is where `cargo build` puts both, and then in Thatch's data directory, where installing the host puts a copy. `--runtime-lib` or `THATCH_RUNTIME_LIB` point it elsewhere. `cargo install` installs only the `thatch` executable, so an installed `thatch` can build executables once the host is installed. The executable takes the same `--frames`, `--timing`, `--seed` and `--input` options as `thatch run --host headless`.
+
+`--object` writes only the object file, and `--object --no-main` writes one without `main`, for a host of your own that includes `thatch.h` and drives the program itself (see [the ABI](abi.md#writing-a-host); `crates/thatch-cli/tests/c_host/host.c` is a complete example).
 
 ### Licenses of a built executable
 

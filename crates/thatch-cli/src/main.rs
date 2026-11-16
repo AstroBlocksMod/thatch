@@ -16,14 +16,25 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Compiles a project in memory and runs it headless, printing what sprites say.
+    /// Runs a project. By default it is built for the host with a window into a temporary
+    /// directory, which is removed when the game ends, and started from there. With --host
+    /// headless it is compiled in memory instead and prints what sprites say.
     Run {
-        /// An .sb3 file or a project.json.
+        /// An .sb3 file or a project.json, which has no costumes and so always runs headless.
         project: PathBuf,
+        /// The host to run on, as for `thatch build`.
+        #[arg(long)]
+        host: Option<String>,
+        /// Where the host's build output is, as for `thatch build`.
+        #[arg(long)]
+        host_dir: Option<PathBuf>,
+        /// The runtime library to link against, as for `thatch build`. Not used headless.
+        #[arg(long)]
+        runtime_lib: Option<PathBuf>,
         /// Stop after this many frames.
         #[arg(long)]
         frames: Option<u64>,
-        /// Print the frame count and wall time to stderr.
+        /// Print the frame count and wall time to stderr. Headless only.
         #[arg(long)]
         timing: bool,
         /// The seed of `pick random`.
@@ -35,8 +46,9 @@ enum Cmd {
         #[arg(long)]
         input: Option<PathBuf>,
     },
-    /// Compiles a project to a standalone executable, and writes the license notices that have to
-    /// ship with it next to it, as OUTPUT.licenses.txt.
+    /// Compiles a project to a game with a window (or, with --host headless, one that prints what
+    /// sprites say), and writes the license notices that have to ship with it next to it, as
+    /// OUTPUT.licenses.txt.
     Build {
         project: PathBuf,
         /// The executable to write (or the object file with --object).
@@ -49,21 +61,27 @@ enum Cmd {
         /// API in thatch.h. Only with --object.
         #[arg(long, requires = "object")]
         no_main: bool,
-        /// The runtime library to link against. Defaults to libthatch_runtime.a next to this
-        /// executable, or $THATCH_RUNTIME_LIB. Its license notices are expected next to it, with
-        /// the extension .licenses.txt in place of .a, where building the runtime puts them.
+        /// The runtime library to link against. Defaults to $THATCH_RUNTIME_LIB, then
+        /// libthatch_runtime.a next to this executable, then the one installed with a host (see
+        /// --host-dir). Its license notices are expected next to it, with the extension
+        /// .licenses.txt in place of .a, where building the runtime puts them.
         #[arg(long)]
         runtime_lib: Option<PathBuf>,
-        /// Build the game for a host with a window instead of the headless one; `scratch-everywhere`
-        /// is the one there is. The project has to be an .sb3. Links the host's adapter, and puts
-        /// the host's shared library, the project file and the host's license texts next to the
-        /// executable.
+        /// The host the game runs on. `scratch-everywhere` opens a window and draws the stage; it
+        /// needs the project as an .sb3, links the host's adapter, and puts the host's shared
+        /// library, the project file and the host's license texts next to the executable.
+        /// `headless` builds a game without a window that prints what sprites say. Without this
+        /// option an .sb3 gets a window when the scratch-everywhere host is installed, and is
+        /// built headless with a note when it is not; a project.json is always headless.
         #[arg(long, conflicts_with = "object")]
         host: Option<String>,
         /// Where the host's build output is: the directory with its thatch-host.txt. Defaults to
-        /// $THATCH_HOST_DIR, then hosts/HOST next to this executable, then the host's build
-        /// directory in a checkout of Thatch.
-        #[arg(long, requires = "host")]
+        /// $THATCH_HOST_DIR, then hosts/HOST next to this executable, then hosts/HOST in Thatch's
+        /// data directory (where `cmake --install` puts a host), then the host's build directory
+        /// in a checkout of Thatch. The data directory is $THATCH_HOME, else
+        /// ~/Library/Application Support/thatch on macOS and $XDG_DATA_HOME/thatch (by default
+        /// ~/.local/share/thatch) elsewhere.
+        #[arg(long)]
         host_dir: Option<PathBuf>,
     },
     /// Prints the IR of a project.
@@ -89,7 +107,13 @@ fn main() -> anyhow::Result<()> {
 
 fn command(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
-        Cmd::Run { project, frames, timing, seed, input } => {
+        Cmd::Run { project, host, host_dir, runtime_lib, frames, timing, seed, input } => {
+            if let Some(host) = choose_host(host, host_dir, &project, "runs")? {
+                if timing {
+                    bail!("--timing is only for --host {HEADLESS}");
+                }
+                return run_on_host(&project, host, runtime_lib, frames, seed, input);
+            }
             let input = match input {
                 Some(path) => {
                     let text =
@@ -101,7 +125,8 @@ fn command(cli: Cli) -> anyhow::Result<()> {
             run(&project, RunOptions { frames, timing, seed, input })
         }
         Cmd::Build { project, output, object, no_main, runtime_lib, host, host_dir } => {
-            let host = host.map(|name| find_host(&name, host_dir)).transpose()?;
+            // An object file is linked by whoever asked for it, so no host is looked for.
+            let host = if object { None } else { choose_host(host, host_dir, &project, "is built")? };
             build(&project, output, object, !no_main, runtime_lib, host)
         }
         Cmd::Dump { project } => {
@@ -128,6 +153,98 @@ fn lower(project: &Path) -> anyhow::Result<thatch_scratch::Lowered> {
     Ok(lowered)
 }
 
+/// The host a game runs on. A host that was asked for has to be there. Without one, an .sb3 gets
+/// the default host with a window if it is installed; otherwise, and for a project.json, which
+/// has no costumes to draw, the game is headless, as `thatch` needs nothing else for that. The
+/// fallback says so, since the player gets no window: `what` is "runs" or "is built".
+fn choose_host(
+    name: Option<String>,
+    host_dir: Option<PathBuf>,
+    project: &Path,
+    what: &str,
+) -> anyhow::Result<Option<Host>> {
+    if let Some(name) = name {
+        return resolve_host(&name, host_dir);
+    }
+    // A directory given for the host means the host is wanted.
+    if host_dir.is_some() {
+        return resolve_host(DEFAULT_HOST, host_dir);
+    }
+    if project.extension().is_none_or(|e| !e.eq_ignore_ascii_case("sb3")) {
+        return Ok(None);
+    }
+    match find_host(DEFAULT_HOST, None) {
+        Ok(host) => Ok(Some(host)),
+        Err(_) => {
+            eprintln!(
+                "note: the {DEFAULT_HOST} host is not installed, so this game {what} without a window. Install it \
+                 as docs/scratch-everywhere.md describes to get one, or pass --host {HEADLESS} to go without this note"
+            );
+            Ok(None)
+        }
+    }
+}
+
+/// Thatch's data directory, where hosts are installed: $THATCH_HOME, else the platform's place
+/// for an application's data.
+fn data_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("THATCH_HOME").filter(|d| !d.is_empty()) {
+        return Some(PathBuf::from(dir));
+    }
+    let home = std::env::var_os("HOME").filter(|d| !d.is_empty()).map(PathBuf::from);
+    if cfg!(target_os = "macos") {
+        return home.map(|h| h.join("Library/Application Support/thatch"));
+    }
+    match std::env::var_os("XDG_DATA_HOME").filter(|d| !d.is_empty()) {
+        Some(dir) => Some(PathBuf::from(dir).join("thatch")),
+        None => home.map(|h| h.join(".local/share/thatch")),
+    }
+}
+
+/// The host called `name`: None for the headless one, which is built in, else its build output.
+fn resolve_host(name: &str, host_dir: Option<PathBuf>) -> anyhow::Result<Option<Host>> {
+    if name != HEADLESS {
+        return find_host(name, host_dir).map(Some);
+    }
+    if host_dir.is_some() {
+        bail!("--host-dir names where a host with a window is; the headless host is built in");
+    }
+    Ok(None)
+}
+
+/// `thatch run` on a host with a window: builds the game into a temporary directory, as `thatch
+/// build` would, and runs it from there until it ends. The directory goes with it.
+fn run_on_host(
+    project: &Path,
+    host: Host,
+    runtime_lib: Option<PathBuf>,
+    frames: Option<u64>,
+    seed: Option<u64>,
+    input: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    let dir =
+        tempfile::Builder::new().prefix("thatch-run-").tempdir().context("could not create a temporary directory")?;
+    let stem = project.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "game".to_owned());
+    let exe = dir.path().join(stem);
+    build(project, Some(exe.clone()), false, true, runtime_lib, Some(host))?;
+    // Only what was asked for is passed on, since a host's adapter takes the options it knows.
+    let mut game = Command::new(&exe);
+    if let Some(frames) = frames {
+        game.arg("--frames").arg(frames.to_string());
+    }
+    if let Some(seed) = seed {
+        game.arg("--seed").arg(seed.to_string());
+    }
+    if let Some(input) = input {
+        game.arg("--input").arg(input);
+    }
+    let status = game.status().with_context(|| format!("could not start {}", exe.display()))?;
+    if !status.success() {
+        bail!("the game ended with {status}");
+    }
+    Ok(())
+}
+
 fn run(project: &Path, options: RunOptions) -> anyhow::Result<()> {
     let lowered = lower(project)?;
     let compiled = thatch_codegen::compile_jit(&lowered.program, &thatch_runtime::symbols())?;
@@ -143,7 +260,9 @@ fn run(project: &Path, options: RunOptions) -> anyhow::Result<()> {
 fn system_libs() -> anyhow::Result<&'static [&'static str]> {
     Ok(match std::env::consts::OS {
         "linux" => &["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"],
-        "macos" => &["-liconv", "-lSystem", "-lc", "-lm"],
+        // rustc also lists -lSystem, -lc and -lm, but cc links libSystem, which holds both of the
+        // others, anyway; naming it again only makes the linker warn about a duplicate.
+        "macos" => &["-liconv"],
         "freebsd" | "openbsd" | "netbsd" => &["-lexecinfo", "-lpthread", "-lm", "-lc"],
         other => bail!("linking is not supported on {other} yet; use --object and link by hand"),
     })
@@ -177,6 +296,11 @@ struct Host {
     project_extension: Option<String>,
 }
 
+/// The host `thatch build` builds for unless told otherwise: games get a window.
+const DEFAULT_HOST: &str = "scratch-everywhere";
+/// The host built into the runtime, which needs no build output of its own.
+const HEADLESS: &str = "headless";
+
 /// Finds the build output of the host called `name` and reads its description.
 fn find_host(name: &str, dir: Option<PathBuf>) -> anyhow::Result<Host> {
     if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
@@ -188,17 +312,28 @@ fn find_host(name: &str, dir: Option<PathBuf>) -> anyhow::Result<Host> {
         candidates.push(dir);
     } else if let Some(dir) = std::env::var_os("THATCH_HOST_DIR") {
         candidates.push(PathBuf::from(dir));
-    } else if let Some(beside) = std::env::current_exe().ok().as_deref().and_then(Path::parent) {
-        // An installed thatch has its hosts next to it. In a checkout, thatch is
-        // target/<profile>/thatch and a host is built in hosts/<name>/build.
-        candidates.push(beside.join("hosts").join(name));
-        candidates.push(beside.join("../../hosts").join(name).join("build/lib"));
+    } else {
+        let beside = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_owned));
+        // A packaged thatch has its hosts next to it.
+        if let Some(beside) = &beside {
+            candidates.push(beside.join("hosts").join(name));
+        }
+        // `cmake --install` puts a host in the data directory, which is how a thatch from
+        // `cargo install`, which comes alone, finds one.
+        if let Some(data) = data_dir() {
+            candidates.push(data.join("hosts").join(name));
+        }
+        // In a checkout, thatch is target/<profile>/thatch and a host is built in hosts/<name>/build.
+        if let Some(beside) = &beside {
+            candidates.push(beside.join("../../hosts").join(name).join("build/lib"));
+        }
     }
     let Some(dir) = candidates.iter().find(|dir| dir.join(MANIFEST).is_file()) else {
         let looked: Vec<String> = candidates.iter().map(|d| d.display().to_string()).collect();
         bail!(
             "the host {name} was not found: no {MANIFEST} in {}. Build the host first (see the docs), \
-             or point --host-dir or THATCH_HOST_DIR at its build output",
+             point --host-dir or THATCH_HOST_DIR at its build output, or build a game without a window \
+             with --host {HEADLESS}",
             looked.join(" or ")
         );
     };
@@ -267,7 +402,8 @@ fn build(
         && project.extension().is_none_or(|e| !e.eq_ignore_ascii_case(extension.as_str()))
     {
         bail!(
-            "the {} host reads the project's costumes when the game runs, so it needs the project as an .{extension} file, not {}",
+            "the {} host reads the project's costumes when the game runs, so it needs the project as an .{extension} file, \
+             not {}; build it with --host {HEADLESS} for a game without a window",
             host.name,
             project.display()
         );
@@ -281,6 +417,7 @@ fn build(
     // place at the end, so a failed build leaves an existing output alone and nobody can plant a
     // path for the intermediate files.
     let parent = output.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent).with_context(|| format!("could not create {}", parent.display()))?;
     let work = tempfile::Builder::new()
         .prefix(".thatch-build-")
         .tempdir_in(parent)
@@ -364,11 +501,19 @@ fn find_runtime_lib(given: Option<PathBuf>) -> anyhow::Result<RuntimeLib> {
         return Ok(RuntimeLib { path: PathBuf::from(p), beside_thatch: false });
     }
     let exe = std::env::current_exe().context("could not find the thatch executable")?;
-    let beside = exe.parent().map(|d| d.join("libthatch_runtime.a"));
-    match beside {
-        Some(path) if path.exists() => Ok(RuntimeLib { path, beside_thatch: true }),
-        _ => bail!("libthatch_runtime.a was not found next to thatch; pass --runtime-lib or set THATCH_RUNTIME_LIB"),
+    if let Some(path) = exe.parent().map(|d| d.join("libthatch_runtime.a")).filter(|p| p.exists()) {
+        return Ok(RuntimeLib { path, beside_thatch: true });
     }
+    // `cargo install` installs only the thatch executable. Installing a host also installs the
+    // runtime library it was built and tested with, and its notices, into the data directory.
+    if let Some(path) = data_dir().map(|d| d.join("lib/libthatch_runtime.a")).filter(|p| p.exists()) {
+        return Ok(RuntimeLib { path, beside_thatch: false });
+    }
+    bail!(
+        "libthatch_runtime.a was not found next to thatch or in Thatch's data directory. A thatch from \
+         `cargo install` comes without it: install a host (see docs/scratch-everywhere.md), which installs \
+         the runtime library too, pass --runtime-lib, or set THATCH_RUNTIME_LIB"
+    )
 }
 
 /// The license notices of a runtime library: the texts that have to ship with every executable

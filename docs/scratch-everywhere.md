@@ -42,9 +42,12 @@ cargo build --workspace
 cmake -S hosts/scratch-everywhere -B hosts/scratch-everywhere/build -DCMAKE_BUILD_TYPE=Release
 cmake --build hosts/scratch-everywhere/build
 ctest --test-dir hosts/scratch-everywhere/build --output-on-failure
+cmake --install hosts/scratch-everywhere/build
 ```
 
-The first configure downloads the libraries Scratch Everywhere! is built from. The build leaves the shared library `libscratch-everywhere`, the adapter `libthatch_host_scratch_everywhere.a`, the host's license texts and its description for `thatch build` in `hosts/scratch-everywhere/build/lib/`.
+The first configure downloads the libraries Scratch Everywhere! is built from. The build leaves the shared library `libscratch-everywhere`, the adapter `libthatch_host_scratch_everywhere.a`, the host's license texts and its description for `thatch build` in `hosts/scratch-everywhere/build/lib/`. A `thatch` built in the same checkout finds them there.
+
+The install step copies them into Thatch's data directory, where every `thatch` looks, including one installed with `cargo install`. It also installs the `libthatch_runtime.a` the host was built and tested with, since `cargo install` installs only the `thatch` executable. The data directory is `~/Library/Application Support/thatch` on macOS and `$XDG_DATA_HOME/thatch` (by default `~/.local/share/thatch`) elsewhere; `THATCH_HOME` moves it, for `thatch` and for the install step alike.
 
 The test builds a small game with `thatch build --host scratch-everywhere` and runs it for two seconds without a window: it plays a key press and two clicks from a script and compares the bubbles with what scratch-vm shows for the same project with a renderer. To watch that game in a window:
 
@@ -54,12 +57,14 @@ hosts/scratch-everywhere/build/test/game
 
 ## Building a game
 
-With the host built, one command builds a game:
+With the host built, this is the host `thatch` uses for an `.sb3`, so one command builds a game:
 
 ```sh
-thatch build game.sb3 --host scratch-everywhere -o dist/game
+thatch build game.sb3 -o dist/game
 dist/game
 ```
+
+and `thatch run game.sb3` builds the same game in a temporary directory and plays it. Both name the host with `--host scratch-everywhere` too, which makes a missing host an error instead of a fallback to the headless host.
 
 It writes four files into `dist/`, which together are the game:
 
@@ -70,7 +75,7 @@ It writes four files into `dist/`, which together are the game:
 | `game.sb3` | A copy of the project, which the costumes are read from when the game starts |
 | `game.licenses.txt` | The license notices to ship: the runtime's, then the host's (see [Licenses](#licenses)) |
 
-The project has to be an `.sb3` file, since a bare `project.json` has no costumes. `thatch` finds the host's build output in `hosts/scratch-everywhere/build/lib` of the checkout it was built in, or in `hosts/scratch-everywhere/` next to an installed `thatch`; `--host-dir` or `THATCH_HOST_DIR` point it elsewhere. SDL2 is not copied: it comes from the system the game runs on.
+The project has to be an `.sb3` file, since a bare `project.json` has no costumes. `thatch` finds the host in `hosts/scratch-everywhere/` next to itself, then in the data directory, then in `hosts/scratch-everywhere/build/lib` of the checkout it was built in; `--host-dir` or `THATCH_HOST_DIR` point it elsewhere. SDL2 is not copied: it comes from the system the game runs on.
 
 `thatch` itself knows nothing about Scratch Everywhere!. The host's build writes a small description, `thatch-host.txt`, next to its libraries: which adapter to link and with which compiler driver, which shared libraries and license texts go next to the game, and that the project file does too. `thatch build --host NAME` reads the description of whichever host is named and follows it.
 

@@ -10,7 +10,7 @@ flowchart LR
     frontend --> ir["thatch-ir<br/>typed IR"]
     ir --> codegen["thatch-codegen<br/>Cranelift"]
     abi["thatch-abi<br/>C ABI"] --> codegen
-    codegen -->|in memory| jit["thatch run"]
+    codegen -->|in memory| jit["thatch run --host headless"]
     codegen -->|object file + cc| exe["standalone executable"]
     abi --> runtime["thatch-runtime<br/>scheduler, values, headless host"]
     values --> runtime
@@ -36,7 +36,7 @@ flowchart LR
 : The [C ABI](abi.md): the `Value` and `ThreadCtx` layouts, the list of runtime functions with their signatures, and the hat kinds. It is `no_std` and has no dependencies, so any host can use it.
 
 `thatch-codegen`
-: Lowers the IR to Cranelift IR and from there to machine code, either into memory (for `thatch run`) or into an object file with a C `main` (for `thatch build`). Numbers are `f64` registers, booleans `i8`, strings handles, and dynamically typed values pointers to 16-byte slots.
+: Lowers the IR to Cranelift IR and from there to machine code, either into memory (for `thatch run --host headless`) or into an object file (for `thatch build`, and for `thatch run` on a host with a window, which builds the game into a temporary directory and starts it), with a C `main` for the headless host or without one for a host that brings its own. Numbers are `f64` registers, booleans `i8`, strings handles, and dynamically typed values pointers to 16-byte slots.
 
 `thatch-runtime`
 : Everything a running program needs that is not its own code: the targets, their variables and their sprite state (position, direction, size, costume, visibility, effects, layer order), strings, the thread scheduler and the headless host. Built as both an rlib (for `thatch run`, which links it into the compiler) and a staticlib (`libthatch_runtime.a`, for executables). Its build script also gathers the license notices of everything the library contains, which `thatch build` writes next to each executable (see [getting started](getting-started.md#licenses-of-a-built-executable)).

@@ -187,19 +187,60 @@ add_custom_command(
 add_custom_target(thatch-host ALL DEPENDS
     scratch-everywhere thatch-host-scratch-everywhere "${HOST_LIB_DIR}/licenses.txt")
 
+# ---- the Cargo workspace's build output ----------------------------------------------------------
+
+# The compiler and the runtime come from the Cargo workspace, which is built first. The test uses
+# both, and the install step installs the runtime library with the host.
+set(THATCH_TARGET_DIR "" CACHE PATH "The directory with thatch and libthatch_runtime.a (target/debug or target/release)")
+if(NOT THATCH_TARGET_DIR)
+    foreach(candidate "${THATCH_ROOT}/target/release" "${THATCH_ROOT}/target/debug")
+        if(EXISTS "${candidate}/thatch" AND EXISTS "${candidate}/libthatch_runtime.a")
+            set(THATCH_TARGET_DIR "${candidate}")
+        endif()
+    endforeach()
+endif()
+
+# ---- installing: where an installed thatch finds the host ---------------------------------------
+
+# `cmake --install` puts the host into Thatch's data directory, where any thatch looks for it,
+# including one from `cargo install`, which comes without a host and without the runtime library.
+# The directory is worked out the way `thatch` works it out.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    if(DEFINED ENV{THATCH_HOME} AND NOT "$ENV{THATCH_HOME}" STREQUAL "")
+        set(THATCH_DATA_DIR "$ENV{THATCH_HOME}")
+    elseif(APPLE)
+        set(THATCH_DATA_DIR "$ENV{HOME}/Library/Application Support/thatch")
+    elseif(DEFINED ENV{XDG_DATA_HOME} AND NOT "$ENV{XDG_DATA_HOME}" STREQUAL "")
+        set(THATCH_DATA_DIR "$ENV{XDG_DATA_HOME}/thatch")
+    else()
+        set(THATCH_DATA_DIR "$ENV{HOME}/.local/share/thatch")
+    endif()
+    set(CMAKE_INSTALL_PREFIX "${THATCH_DATA_DIR}" CACHE PATH "Thatch's data directory" FORCE)
+endif()
+
+# The host goes to hosts/scratch-everywhere as the build leaves it in lib/: the paths in its
+# description are relative, so it works from anywhere.
+install(FILES
+    "$<TARGET_FILE:scratch-everywhere>"
+    "$<TARGET_FILE:thatch-host-scratch-everywhere>"
+    "${HOST_LIB_DIR}/licenses.txt"
+    "${HOST_LIB_DIR}/thatch-host.txt"
+    DESTINATION hosts/scratch-everywhere)
+# The runtime library the host was built and tested with, with its notices, for a thatch that has
+# none next to it. A program built against another version of the ABI is refused when it loads.
+if(EXISTS "${THATCH_TARGET_DIR}/libthatch_runtime.a")
+    install(FILES
+        "${THATCH_TARGET_DIR}/libthatch_runtime.a"
+        "${THATCH_TARGET_DIR}/libthatch_runtime.licenses.txt"
+        DESTINATION lib)
+else()
+    message(STATUS "libthatch_runtime.a was not found (build the Cargo workspace, or set THATCH_TARGET_DIR); the install step will not install it")
+endif()
+
 # ---- the test: a game built the way `thatch build` builds one -----------------------------------
 
 include(CTest)
 if(BUILD_TESTING)
-    # The compiler and the runtime come from the Cargo workspace, which is built first.
-    set(THATCH_TARGET_DIR "" CACHE PATH "The directory with thatch and libthatch_runtime.a (target/debug or target/release)")
-    if(NOT THATCH_TARGET_DIR)
-        foreach(candidate "${THATCH_ROOT}/target/release" "${THATCH_ROOT}/target/debug")
-            if(EXISTS "${candidate}/thatch" AND EXISTS "${candidate}/libthatch_runtime.a")
-                set(THATCH_TARGET_DIR "${candidate}")
-            endif()
-        endforeach()
-    endif()
     if(NOT EXISTS "${THATCH_TARGET_DIR}/thatch" OR NOT EXISTS "${THATCH_TARGET_DIR}/libthatch_runtime.a")
         message(STATUS "thatch was not found (build the Cargo workspace, or set THATCH_TARGET_DIR); skipping the host tests")
     else()

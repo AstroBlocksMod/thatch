@@ -833,6 +833,7 @@ dependencies = [
  "thatch-runtime",
  "thatch-sb3",
  "thatch-scratch",
+ "zip",
 ]
 
 [[package]]

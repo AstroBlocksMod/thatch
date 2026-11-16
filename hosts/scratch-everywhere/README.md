@@ -28,11 +28,12 @@ cargo build --workspace
 cmake -S hosts/scratch-everywhere -B hosts/scratch-everywhere/build -DCMAKE_BUILD_TYPE=Release
 cmake --build hosts/scratch-everywhere/build
 ctest --test-dir hosts/scratch-everywhere/build --output-on-failure
+cmake --install hosts/scratch-everywhere/build   # for a thatch from `cargo install`
 ```
 
 The first configure downloads the libraries Scratch Everywhere! is built from. The build never changes the submodule: it copies the pinned commit into the build directory and applies the patch to the copy.
 
-The build leaves four files in `build/lib/`: the shared library `libscratch-everywhere`, the adapter `libthatch_host_scratch_everywhere.a`, `licenses.txt` with the license texts a game has to ship because of this host, and `thatch-host.txt`, which tells `thatch build --host scratch-everywhere` what to link and what to put next to a game. The test builds a game with that command and runs it without a window.
+The build leaves four files in `build/lib/`: the shared library `libscratch-everywhere`, the adapter `libthatch_host_scratch_everywhere.a`, `licenses.txt` with the license texts a game has to ship because of this host, and `thatch-host.txt`, which tells `thatch build --host scratch-everywhere` what to link and what to put next to a game. The test builds a game with that command and runs it without a window. A `thatch` built in the same checkout finds the host there. The install step copies the four files, and the `libthatch_runtime.a` the host was tested with, into Thatch's data directory, where any `thatch` finds them; see [the docs](../../docs/scratch-everywhere.md#building-the-host).
 
 To see the test game in a window:
 
@@ -40,10 +41,11 @@ To see the test game in a window:
 hosts/scratch-everywhere/build/test/game
 ```
 
-And to build a game of your own:
+And to play or build a game of your own, which uses this host by default once it is built:
 
 ```sh
-target/debug/thatch build game.sb3 --host scratch-everywhere -o dist/game
+target/debug/thatch run game.sb3
+target/debug/thatch build game.sb3 -o dist/game
 ```
 
 Space moves the square, a click on it changes its costume.

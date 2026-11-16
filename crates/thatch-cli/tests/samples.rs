@@ -49,6 +49,14 @@ fn thatch() -> Command {
     Command::new(env!("CARGO_BIN_EXE_thatch"))
 }
 
+/// `thatch build` for the headless host. Builds default to the host with a window, but the
+/// samples are checked against scratch-vm without a renderer, and are bare project.json files.
+fn headless_build() -> Command {
+    let mut command = thatch();
+    command.arg("build").arg("--host").arg("headless");
+    command
+}
+
 fn runtime_lib() -> PathBuf {
     let lib = Path::new(env!("CARGO_BIN_EXE_thatch")).with_file_name("libthatch_runtime.a");
     assert!(lib.exists(), "{} is missing; build the workspace first", lib.display());
@@ -86,7 +94,14 @@ fn check_output(name: &str, mode: &str, output: &std::process::Output) {
 fn samples_run_in_memory() {
     for name in sample_names() {
         let project = samples_dir().join(&name).join("project.json");
-        let output = thatch().arg("run").arg(&project).args(run_args(&name)).output().expect("thatch runs");
+        let output = thatch()
+            .arg("run")
+            .arg("--host")
+            .arg("headless")
+            .arg(&project)
+            .args(run_args(&name))
+            .output()
+            .expect("thatch runs");
         check_output(&name, "run", &output);
     }
 }
@@ -98,8 +113,7 @@ fn samples_build_to_executables() {
     for name in sample_names() {
         let project = samples_dir().join(&name).join("project.json");
         let exe = out_dir.path().join(&name);
-        let build = thatch()
-            .arg("build")
+        let build = headless_build()
             .arg(&project)
             .arg("-o")
             .arg(&exe)
@@ -128,8 +142,7 @@ fn a_build_writes_the_license_notices_next_to_the_executable() {
     let out_dir = temp_out_dir("notices");
     let project = samples_dir().join("hello").join("project.json");
     let exe = out_dir.path().join("hello.bin");
-    let build = thatch()
-        .arg("build")
+    let build = headless_build()
         .arg(&project)
         .arg("-o")
         .arg(&exe)
@@ -149,8 +162,7 @@ fn a_build_writes_the_license_notices_next_to_the_executable() {
     let lone = out_dir.path().join("libother.a");
     std::fs::copy(&runtime_lib, &lone).expect("the library copies");
     let exe = out_dir.path().join("lone");
-    let build = thatch()
-        .arg("build")
+    let build = headless_build()
         .arg(&project)
         .arg("-o")
         .arg(&exe)
@@ -170,6 +182,47 @@ fn a_build_writes_the_license_notices_next_to_the_executable() {
         thatch().arg("build").arg(&project).arg("--object").arg("-o").arg(&object).output().expect("thatch builds");
     assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
     assert!(!out_dir.path().join("hello.o.licenses.txt").exists());
+}
+
+/// An .sb3 is built for the host with a window unless asked otherwise. Where that host is not
+/// installed, as for a thatch from `cargo install`, `thatch run` runs it headless and says so,
+/// while asking for the host by name is an error.
+#[test]
+fn without_the_host_an_sb3_runs_headless_with_a_note() {
+    let dir = temp_out_dir("no-host");
+    let sb3 = dir.path().join("hello.sb3");
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&sb3).expect("the archive is created"));
+    let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file("project.json", stored).expect("the entry starts");
+    std::io::Write::write_all(&mut zip, &std::fs::read(samples_dir().join("hello/project.json")).expect("the sample"))
+        .expect("the entry is written");
+    zip.finish().expect("the archive is finished");
+    // No host anywhere: an empty host directory, and an empty data directory.
+    let nowhere = dir.path().join("nowhere");
+    std::fs::create_dir(&nowhere).expect("the directory is created");
+    let run = |extra: &[&str]| {
+        thatch()
+            .arg("run")
+            .arg(&sb3)
+            .args(extra)
+            .env("THATCH_HOST_DIR", &nowhere)
+            .env("THATCH_HOME", &nowhere)
+            .output()
+            .expect("thatch runs")
+    };
+
+    let output = run(&[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected("hello"));
+    assert!(stderr.contains("note:") && stderr.contains("without a window"), "{stderr}");
+
+    let quiet = run(&["--host", "headless"]);
+    assert!(quiet.status.success() && quiet.stderr.is_empty(), "{}", String::from_utf8_lossy(&quiet.stderr));
+
+    let asked = run(&["--host", "scratch-everywhere"]);
+    let stderr = String::from_utf8_lossy(&asked.stderr);
+    assert!(!asked.status.success() && stderr.contains("was not found"), "{stderr}");
 }
 
 fn run_ok(command: &mut Command, what: &str) {
@@ -233,6 +286,21 @@ fn a_build_for_a_host_follows_the_hosts_description() {
     // The game is the adapter's main around the compiled program, and runs like the C host.
     let output = Command::new(&exe).arg("--frames").arg("3000").output().expect("the game runs");
     check_output("hello", "made-up host", &output);
+    // `thatch run` on the host builds the same game in a temporary directory and runs it.
+    let run = thatch()
+        .arg("run")
+        .arg(&project)
+        .arg("--host")
+        .arg("made-up")
+        .arg("--host-dir")
+        .arg(dir)
+        .arg("--runtime-lib")
+        .arg(&runtime_lib)
+        .arg("--frames")
+        .arg("3000")
+        .output()
+        .expect("thatch runs");
+    check_output("hello", "thatch run on a made-up host", &run);
     // Next to it: the shared library, the project file under the game's name, and the notices of
     // the runtime with the host's after them.
     assert!(out_dir.path().join(library).is_file(), "the shared library is next to the game");
