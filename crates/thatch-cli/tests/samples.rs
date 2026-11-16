@@ -223,6 +223,35 @@ fn without_the_host_an_sb3_runs_headless_with_a_note() {
     let asked = run(&["--host", "scratch-everywhere"]);
     let stderr = String::from_utf8_lossy(&asked.stderr);
     assert!(!asked.status.success() && stderr.contains("was not found"), "{stderr}");
+
+    // --timing measures the in-memory run, so without a host asked for, it runs headless quietly.
+    let timed = run(&["--timing"]);
+    let stderr = String::from_utf8_lossy(&timed.stderr);
+    assert!(timed.status.success() && !stderr.contains("note:") && stderr.contains("frames in"), "{stderr}");
+    // A headless run links nothing, so a runtime library given for it is a mistake worth saying.
+    let linked = run(&["--host", "headless", "--runtime-lib", "libthatch_runtime.a"]);
+    assert!(!linked.status.success(), "{}", String::from_utf8_lossy(&linked.stderr));
+}
+
+/// An empty variable is no setting: an empty THATCH_HOST_DIR does not make thatch look for a host
+/// in the current directory and skip the others.
+#[test]
+fn an_empty_host_dir_variable_is_ignored() {
+    let dir = temp_out_dir("empty-host-dir");
+    let manifest = dir.path().join("thatch-host.txt");
+    std::fs::write(&manifest, "adapter = nothing-here.a\n").expect("a decoy description");
+    let output = thatch()
+        .arg("build")
+        .arg(samples_dir().join("hello/project.json"))
+        .args(["--host", "made-up", "-o"])
+        .arg(dir.path().join("game"))
+        .current_dir(dir.path())
+        .env("THATCH_HOST_DIR", "")
+        .env("THATCH_HOME", dir.path().join("nowhere"))
+        .output()
+        .expect("thatch builds");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("was not found"), "the decoy was read: {stderr}");
 }
 
 fn run_ok(command: &mut Command, what: &str) {
@@ -325,6 +354,52 @@ fn a_build_for_a_host_follows_the_hosts_description() {
     let broken = build(&project, dir);
     let stderr = String::from_utf8_lossy(&broken.stderr);
     assert!(!broken.status.success() && stderr.contains("libgone.a"), "{stderr}");
+
+    // A description may only name files of its own directory and link with a compiler driver,
+    // since thatch finds it by path and runs and copies what it names.
+    for (text, refused) in [
+        ("adapter = libadapter.a\nnotices = ../../secret.txt\n", "secret.txt"),
+        ("adapter = /etc/passwd\n", "/etc/passwd"),
+        ("adapter = libadapter.a\nlinker = /bin/sh\n", "/bin/sh"),
+    ] {
+        std::fs::write(dir.join("thatch-host.txt"), text).expect("rewritten");
+        let refused_build = build(&project, dir);
+        let stderr = String::from_utf8_lossy(&refused_build.stderr);
+        assert!(!refused_build.status.success() && stderr.contains(refused), "{text}: {stderr}");
+    }
+
+    // Two files of one build cannot go to the same place: here the executable is given the name
+    // of the host's library. The build fails before it replaces anything.
+    std::fs::write(dir.join("thatch-host.txt"), &manifest).expect("rewritten");
+    let clash = out_dir.path().join(library);
+    let before = std::fs::read(&clash).expect("the library from the first build");
+    let output = thatch()
+        .arg("build")
+        .arg(&project)
+        .args(["--host", "made-up", "--host-dir"])
+        .arg(dir)
+        .arg("--runtime-lib")
+        .arg(&runtime_lib)
+        .arg("-o")
+        .arg(&clash)
+        .output()
+        .expect("thatch builds");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("two of the files"), "{stderr}");
+    assert_eq!(std::fs::read(&clash).expect("still there"), before, "nothing was replaced");
+
+    // `thatch run` on a host ends as the game did: the C host refuses arguments it does not know.
+    let run = thatch()
+        .arg("run")
+        .arg(&project)
+        .args(["--host", "made-up", "--host-dir"])
+        .arg(dir)
+        .arg("--runtime-lib")
+        .arg(&runtime_lib)
+        .args(["--seed", "1"])
+        .output()
+        .expect("thatch runs");
+    assert_eq!(run.status.code(), Some(2), "{}", String::from_utf8_lossy(&run.stderr));
 }
 
 #[test]

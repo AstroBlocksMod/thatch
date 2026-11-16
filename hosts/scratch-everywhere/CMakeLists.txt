@@ -114,17 +114,21 @@ foreach(property COMPILE_OPTIONS LINK_LIBRARIES)
 endforeach()
 
 set(HOST_LIB_DIR "${CMAKE_CURRENT_BINARY_DIR}/lib")
+# A multi-configuration generator (Xcode, Visual Studio, Ninja Multi-Config) puts each target into
+# a directory per configuration unless the output directory is a generator expression. The empty
+# one, $<0:>, keeps every file in lib/, next to the thatch-host.txt that names them.
+set(HOST_OUTPUT_DIR "${HOST_LIB_DIR}$<0:>")
 set_target_properties(scratch-everywhere PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${HOST_LIB_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY "${HOST_LIB_DIR}"
-    ARCHIVE_OUTPUT_DIRECTORY "${HOST_LIB_DIR}")
+    LIBRARY_OUTPUT_DIRECTORY "${HOST_OUTPUT_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY "${HOST_OUTPUT_DIR}"
+    ARCHIVE_OUTPUT_DIRECTORY "${HOST_OUTPUT_DIR}")
 
 # ---- the adapter ---------------------------------------------------------------------------------
 
 add_library(thatch-host-scratch-everywhere STATIC adapter/thatch_host.cpp)
 set_target_properties(thatch-host-scratch-everywhere PROPERTIES
     OUTPUT_NAME thatch_host_scratch_everywhere
-    ARCHIVE_OUTPUT_DIRECTORY "${HOST_LIB_DIR}"
+    ARCHIVE_OUTPUT_DIRECTORY "${HOST_OUTPUT_DIR}"
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     POSITION_INDEPENDENT_CODE ON)
@@ -181,7 +185,11 @@ add_custom_command(
         "-DPATCH=${SE_PATCH}"
         "-DSOURCE_DIRS=${SE_SOURCE_DIRS_FILE}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/notices.cmake"
-    DEPENDS notices.cmake "${SE_PATCH}" LICENSES/GPL-3.0.txt "${SE_SOURCE_DIRS_FILE}"
+    # Everything the notices are made of. The stamp changes with the pinned commit (which the
+    # notices name) and the patch; the list of source directories changes when a dependency moves
+    # to another version, since Catalog unpacks each version into a directory of its own.
+    DEPENDS notices.cmake "${SE_PATCH}" "${SE_STAMP_FILE}" "${SE_PATCHED}/LICENSE" LICENSES/GPL-3.0.txt
+        "${SE_SOURCE_DIRS_FILE}"
     VERBATIM)
 
 add_custom_target(thatch-host ALL DEPENDS
@@ -193,9 +201,12 @@ add_custom_target(thatch-host ALL DEPENDS
 # both, and the install step installs the runtime library with the host.
 set(THATCH_TARGET_DIR "" CACHE PATH "The directory with thatch and libthatch_runtime.a (target/debug or target/release)")
 if(NOT THATCH_TARGET_DIR)
+    # With both a release and a debug build, the one built last, whose runtime is the current one.
     foreach(candidate "${THATCH_ROOT}/target/release" "${THATCH_ROOT}/target/debug")
         if(EXISTS "${candidate}/thatch" AND EXISTS "${candidate}/libthatch_runtime.a")
-            set(THATCH_TARGET_DIR "${candidate}")
+            if(NOT THATCH_TARGET_DIR OR "${candidate}/libthatch_runtime.a" IS_NEWER_THAN "${THATCH_TARGET_DIR}/libthatch_runtime.a")
+                set(THATCH_TARGET_DIR "${candidate}")
+            endif()
         endif()
     endforeach()
 endif()
@@ -240,11 +251,16 @@ install(FILES
     DESTINATION hosts/scratch-everywhere)
 # The runtime library the host was built and tested with, with its notices, for a thatch that has
 # none next to it. A program built against another version of the ABI is refused when it loads.
-if(EXISTS "${THATCH_TARGET_DIR}/libthatch_runtime.a")
+if(EXISTS "${THATCH_TARGET_DIR}/libthatch_runtime.a" AND EXISTS "${THATCH_TARGET_DIR}/libthatch_runtime.licenses.txt")
     install(FILES
         "${THATCH_TARGET_DIR}/libthatch_runtime.a"
         "${THATCH_TARGET_DIR}/libthatch_runtime.licenses.txt"
         DESTINATION lib)
+elseif(EXISTS "${THATCH_TARGET_DIR}/libthatch_runtime.a")
+    # The library without its notices would be shipped without them, so neither is installed.
+    message(WARNING "${THATCH_TARGET_DIR} has libthatch_runtime.a but not libthatch_runtime.licenses.txt next to it; "
+        "the install step will not install the runtime. Build the Cargo workspace again, and see the warnings of "
+        "thatch-runtime's build script")
 else()
     message(STATUS "libthatch_runtime.a was not found (build the Cargo workspace, or set THATCH_TARGET_DIR); the install step will not install it")
 endif()
@@ -275,8 +291,11 @@ if(BUILD_TESTING)
             OUTPUT "${TEST_DIR}/game" "${TEST_DIR}/game.sb3" "${TEST_DIR}/game.licenses.txt"
             COMMAND "${THATCH_TARGET_DIR}/thatch" build "${TEST_DIR}/project.sb3"
                 --host scratch-everywhere --host-dir "${HOST_LIB_DIR}" -o "${TEST_DIR}/game"
+            # The files themselves, not only the targets that make them: a target name only orders
+            # the build, so a changed adapter or library would otherwise leave the old game in place.
             DEPENDS "${TEST_DIR}/project.sb3" "${THATCH_TARGET_DIR}/thatch" "${THATCH_TARGET_DIR}/libthatch_runtime.a"
-                thatch-host "${HOST_LIB_DIR}/licenses.txt"
+                thatch-host "${HOST_LIB_DIR}/licenses.txt" "${HOST_LIB_DIR}/thatch-host.txt"
+                "$<TARGET_FILE:thatch-host-scratch-everywhere>" "$<TARGET_FILE:scratch-everywhere>"
             VERBATIM)
         add_custom_target(thatch-host-tests ALL DEPENDS "${TEST_DIR}/game")
 

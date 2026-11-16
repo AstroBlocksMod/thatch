@@ -1,0 +1,8 @@
+SPDX-FileCopyrightText: 2007 Free Software Foundation, Inc. <https://fsf.org/>
+SPDX-License-Identifier: LicenseRef-FSF-verbatim-copying
+
+GPL-3.0.txt is the text of the GNU General Public License, version 3, as the Free Software
+Foundation publishes it. It is kept unchanged, so that the host's build can copy it into the
+notices games ship; it cannot carry a line of its own. Its terms of use are the ones it states at
+its top: "Everyone is permitted to copy and distribute verbatim copies of this license document,
+but changing it is not allowed."

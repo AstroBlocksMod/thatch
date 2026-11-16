@@ -75,6 +75,10 @@ foreach(root IN LISTS roots)
         execute_process(
             COMMAND git -C "${root}" remote get-url origin
             OUTPUT_VARIABLE name OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        # The notices are shipped, so a user name, password or token in the URL
+        # (https://user:token@host/...) is cut out, and so is a query string.
+        string(REGEX REPLACE "^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@" "\\1" name "${name}")
+        string(REGEX REPLACE "[?#].*$" "" name "${name}")
     endif()
     foreach(top IN LISTS tops)
         if(name STREQUAL "" AND EXISTS "${top}/CMakeLists.txt")

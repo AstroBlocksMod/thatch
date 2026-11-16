@@ -29,8 +29,8 @@ comments, in a file of the same name with ".license" added.
    its functions, and it contains no code copied from the library.
 
 LICENSES/ holds the text of the GNU General Public License, version 3, which the build copies
-into the notices games ship. A license text is not itself a licensed work, so it has no SPDX
-line; the Free Software Foundation allows verbatim copies of it.
+into the notices games ship. It is kept unchanged, so its SPDX lines are in GPL-3.0.txt.license
+next to it: the Free Software Foundation allows verbatim copies of it.
 
 Nothing outside this directory is derived from, includes or depends on anything inside it, and
 tools/check-hosts.sh, which CI runs, keeps it that way. This directory is not part of the Cargo

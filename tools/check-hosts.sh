@@ -51,10 +51,6 @@ while IFS= read -r entry; do
     mode=${entry%% *}
     file=${entry#*$'\t'}
     [ "$mode" = "160000" ] && continue
-    # The texts of licenses themselves, kept for the notices games ship, are not licensed works.
-    case "$file" in
-        hosts/*/LICENSES/*) continue ;;
-    esac
     if head -n 5 "$file" | grep -q "SPDX-License-Identifier: "; then
         continue
     fi

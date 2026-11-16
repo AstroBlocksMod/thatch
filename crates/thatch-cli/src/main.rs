@@ -76,12 +76,13 @@ enum Cmd {
         #[arg(long, conflicts_with = "object")]
         host: Option<String>,
         /// Where the host's build output is: the directory with its thatch-host.txt. Defaults to
-        /// $THATCH_HOST_DIR, then hosts/HOST next to this executable, then hosts/HOST in Thatch's
-        /// data directory (where `cmake --install` puts a host), then the host's build directory
-        /// in a checkout of Thatch. The data directory is $THATCH_HOME, else
+        /// $THATCH_HOST_DIR, then hosts/HOST next to this executable, then the host's build
+        /// directory in the checkout this thatch was built in (so that a fresh build wins over an
+        /// older install), then hosts/HOST in Thatch's data directory (where `cmake --install`
+        /// puts a host). The data directory is $THATCH_HOME, else
         /// ~/Library/Application Support/thatch on macOS and $XDG_DATA_HOME/thatch (by default
         /// ~/.local/share/thatch) elsewhere.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "object")]
         host_dir: Option<PathBuf>,
     },
     /// Prints the IR of a project.
@@ -108,11 +109,23 @@ fn main() -> anyhow::Result<()> {
 fn command(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Cmd::Run { project, host, host_dir, runtime_lib, frames, timing, seed, input } => {
-            if let Some(host) = choose_host(host, host_dir, &project, "runs")? {
+            // --timing measures the in-memory run, so without a host asked for it means headless,
+            // as `thatch run --timing` always did.
+            let host = if timing && host.is_none() && host_dir.is_none() {
+                None
+            } else {
+                choose_host(host, host_dir, &project, "runs")?
+            };
+            if let Some(host) = host {
                 if timing {
                     bail!("--timing is only for --host {HEADLESS}");
                 }
                 return run_on_host(&project, host, runtime_lib, frames, seed, input);
+            }
+            if runtime_lib.is_some() {
+                bail!(
+                    "--runtime-lib is for a game that is linked; a headless run compiles in memory and links nothing"
+                );
             }
             let input = match input {
                 Some(path) => {
@@ -238,11 +251,26 @@ fn run_on_host(
     if let Some(input) = input {
         game.arg("--input").arg(input);
     }
+    // Ctrl-C in a terminal reaches the game and thatch alike. The game decides what to do with
+    // it; thatch waits for it to end, so that the temporary directory is removed after all.
+    ctrlc::set_handler(|| {}).context("could not set up Ctrl-C handling")?;
     let status = game.status().with_context(|| format!("could not start {}", exe.display()))?;
+    drop(dir);
     if !status.success() {
-        bail!("the game ended with {status}");
+        // The game has said what went wrong; thatch ends as it did, as a shell would show it.
+        std::process::exit(exit_code(status));
     }
     Ok(())
+}
+
+/// The status a process ended with, as a shell gives it: its exit code, or 128 plus the signal
+/// that ended it.
+fn exit_code(status: std::process::ExitStatus) -> i32 {
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
+        return 128 + signal;
+    }
+    status.code().unwrap_or(1)
 }
 
 fn run(project: &Path, options: RunOptions) -> anyhow::Result<()> {
@@ -300,6 +328,13 @@ struct Host {
 const DEFAULT_HOST: &str = "scratch-everywhere";
 /// The host built into the runtime, which needs no build output of its own.
 const HEADLESS: &str = "headless";
+/// The compiler drivers a host's description may ask to link with.
+const LINKERS: &[&str] = &["cc", "c++"];
+
+/// A path from the environment, unless the variable is unset or empty.
+fn env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
 
 /// Finds the build output of the host called `name` and reads its description.
 fn find_host(name: &str, dir: Option<PathBuf>) -> anyhow::Result<Host> {
@@ -310,22 +345,25 @@ fn find_host(name: &str, dir: Option<PathBuf>) -> anyhow::Result<Host> {
     let mut candidates = Vec::new();
     if let Some(dir) = dir {
         candidates.push(dir);
-    } else if let Some(dir) = std::env::var_os("THATCH_HOST_DIR") {
-        candidates.push(PathBuf::from(dir));
+    } else if let Some(dir) = env_path("THATCH_HOST_DIR") {
+        candidates.push(dir);
     } else {
         let beside = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_owned));
-        // A packaged thatch has its hosts next to it.
         if let Some(beside) = &beside {
+            // A packaged thatch has its hosts next to it.
             candidates.push(beside.join("hosts").join(name));
+            // In a checkout, thatch is target/<profile>/thatch, or target/<triple>/<profile>/thatch
+            // when built for a target, and a host is built in hosts/<name>/build. That comes
+            // before the data directory, so that a thatch built in a checkout uses the host built
+            // with it rather than an older one installed from it, which may be for an older ABI.
+            for checkout in beside.ancestors().skip(2).take(2) {
+                candidates.push(checkout.join("hosts").join(name).join("build/lib"));
+            }
         }
         // `cmake --install` puts a host in the data directory, which is how a thatch from
         // `cargo install`, which comes alone, finds one.
         if let Some(data) = data_dir() {
             candidates.push(data.join("hosts").join(name));
-        }
-        // In a checkout, thatch is target/<profile>/thatch and a host is built in hosts/<name>/build.
-        if let Some(beside) = &beside {
-            candidates.push(beside.join("../../hosts").join(name).join("build/lib"));
         }
     }
     let Some(dir) = candidates.iter().find(|dir| dir.join(MANIFEST).is_file()) else {
@@ -353,17 +391,30 @@ fn find_host(name: &str, dir: Option<PathBuf>) -> anyhow::Result<Host> {
             continue;
         }
         let entry = line.split_once('=').map(|(key, value)| (key.trim(), value.trim()));
+        let at = || format!("{} line {}", manifest.display(), number + 1);
+        // The description is read from a directory found by path, so what it may make thatch do
+        // is limited: name files of that directory only, and link with a compiler driver.
+        let file = |value: &str| -> anyhow::Result<PathBuf> {
+            let plain = !value.is_empty()
+                && value != "."
+                && value != ".."
+                && !value.contains(['/', '\\'])
+                && Path::new(value).file_name() == Some(std::ffi::OsStr::new(value));
+            if !plain {
+                bail!("{}: {value:?} is not the name of a file in the host's directory", at());
+            }
+            Ok(dir.join(value))
+        };
         match entry {
-            Some(("adapter", value)) => host.adapter = dir.join(value),
-            Some(("library", value)) => host.libraries.push(dir.join(value)),
-            Some(("notices", value)) => host.notices = Some(dir.join(value)),
-            Some(("linker", value)) => host.linker = value.to_owned(),
-            Some(("project", value)) => host.project_extension = Some(value.to_owned()),
-            _ => bail!(
-                "{} line {}: expected adapter, library, notices, linker or project",
-                manifest.display(),
-                number + 1
-            ),
+            Some(("adapter", value)) => host.adapter = file(value)?,
+            Some(("library", value)) => host.libraries.push(file(value)?),
+            Some(("notices", value)) => host.notices = Some(file(value)?),
+            Some(("linker", value)) if LINKERS.contains(&value) => host.linker = value.to_owned(),
+            Some(("linker", value)) => bail!("{}: the linker {value:?} is not one of {}", at(), LINKERS.join(", ")),
+            Some(("project", value)) if !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric()) => {
+                host.project_extension = Some(value.to_owned());
+            }
+            _ => bail!("{}: expected adapter, library, notices, linker or project", at()),
         }
     }
     if host.adapter.as_os_str().is_empty() {
@@ -408,29 +459,41 @@ fn build(
             project.display()
         );
     }
-    let lowered = lower(project)?;
-    // A host brings its own main.
-    let bytes = thatch_codegen::compile_object(&lowered.program, with_main && host.is_none())?;
     let stem = project.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "program".to_owned());
     let output = output.unwrap_or_else(|| PathBuf::from(if object_only { format!("{stem}.o") } else { stem.clone() }));
     // Everything is written into a fresh private directory next to the output and moved into
     // place at the end, so a failed build leaves an existing output alone and nobody can plant a
-    // path for the intermediate files.
+    // path for the intermediate files. Each kind of file has a directory of its own in there, so
+    // that no project or output name can make two of them the same file.
     let parent = output.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent).with_context(|| format!("could not create {}", parent.display()))?;
     let work = tempfile::Builder::new()
         .prefix(".thatch-build-")
         .tempdir_in(parent)
         .with_context(|| format!("could not create a work directory in {}", parent.display()))?;
-    let object = work.path().join(format!("{stem}.o"));
+    let dir = |name: &str| -> anyhow::Result<PathBuf> {
+        let dir = work.path().join(name);
+        std::fs::create_dir(&dir).with_context(|| format!("could not create {}", dir.display()))?;
+        Ok(dir)
+    };
+    let (source_dir, link_dir, staging) = (dir("source")?, dir("link")?, dir("ship")?);
+
+    // The project is read once, into the work directory, and that copy is both compiled and
+    // shipped, so that a project saved again in the middle of the build cannot give the game the
+    // code of one version and the costumes of another.
+    let snapshot = source_dir.join(project.file_name().unwrap_or(std::ffi::OsStr::new("project")));
+    std::fs::copy(project, &snapshot).with_context(|| format!("could not read {}", project.display()))?;
+    let lowered = lower(&snapshot)?;
+    // A host brings its own main.
+    let bytes = thatch_codegen::compile_object(&lowered.program, with_main && host.is_none())?;
+    let object = link_dir.join("program.o");
     std::fs::write(&object, bytes).with_context(|| format!("could not write {}", object.display()))?;
     if object_only {
-        std::fs::rename(&object, &output).with_context(|| format!("could not write {}", output.display()))?;
-        return Ok(());
+        return publish(&[(object, output)]);
     }
     let runtime = find_runtime_lib(runtime_lib)?;
     let mut notices = runtime_notices(&runtime)?;
-    let exe = work.path().join(&stem);
+    let exe = link_dir.join("program");
     let linker = host.as_ref().map_or("cc", |h| h.linker.as_str());
     let mut link = Command::new(linker);
     link.arg("-o").arg(&exe).arg(&object);
@@ -440,7 +503,10 @@ fn build(
     }
     link.arg(&runtime.path);
     if let Some(host) = host.as_ref().filter(|h| !h.libraries.is_empty()) {
-        link.args(&host.libraries).arg(rpath_beside_executable());
+        for library in &host.libraries {
+            link_shared(&mut link, library);
+        }
+        link.arg(rpath_beside_executable());
     }
     let status = link
         .args(system_libs()?)
@@ -450,14 +516,12 @@ fn build(
         bail!("linking failed");
     }
 
-    // What ships with the executable goes next to it. Everything is prepared in a directory of
-    // its own in the work directory first and then moved into place, the executable last.
-    let staging = work.path().join("ship");
-    std::fs::create_dir(&staging).with_context(|| format!("could not create {}", staging.display()))?;
+    // What ships with the executable goes next to it, the executable last.
     let mut moves = Vec::new();
     if let Some(host) = &host {
         // The shared libraries the game loads from its own directory. Shipping them as separate
-        // files is also what lets a player replace one, which the LGPL asks for.
+        // files is also what lets a player replace one, which the LGPL asks for. A rebuild
+        // replaces the copy an earlier build put there.
         for library in &host.libraries {
             let name = library.file_name().context("a host library has no file name")?;
             let staged = staging.join(name);
@@ -465,9 +529,7 @@ fn build(
             moves.push((staged, output.with_file_name(name)));
         }
         if let Some(extension) = &host.project_extension {
-            let staged = staging.join(format!("project.{extension}"));
-            std::fs::copy(project, &staged).with_context(|| format!("could not copy {}", project.display()))?;
-            moves.push((staged, beside(&output, &format!(".{extension}"))));
+            moves.push((snapshot.clone(), beside(&output, &format!(".{extension}"))));
         }
         if let Some(path) = &host.notices {
             let text = std::fs::read_to_string(path).with_context(|| format!("could not read {}", path.display()))?;
@@ -480,10 +542,69 @@ fn build(
     std::fs::write(&notices_file, notices).context("could not write the license notices")?;
     moves.push((notices_file, beside(&output, ".licenses.txt")));
     moves.push((exe, output));
-    for (from, to) in moves {
-        std::fs::rename(&from, &to).with_context(|| format!("could not write {}", to.display()))?;
+    publish(&moves)
+}
+
+/// Links a host's shared library. On Linux by file name from its directory (`-l:name`), so that a
+/// library built without a soname is still recorded by name and found next to the game through
+/// the rpath, not at the path it had when the game was built. Elsewhere by path: a macOS library
+/// carries the name it is loaded by in itself.
+fn link_shared(link: &mut Command, library: &Path) {
+    match (cfg!(target_os = "linux"), library.parent(), library.file_name()) {
+        (true, Some(dir), Some(name)) => {
+            link.arg("-L").arg(dir).arg(format!("-l:{}", name.to_string_lossy()));
+        }
+        _ => {
+            link.arg(library);
+        }
     }
-    Ok(())
+}
+
+/// Moves the files of a build into place, as `(from, to)` pairs in order. Two files may not go
+/// to the same place. When a move fails, the ones before it are undone and the files they
+/// replaced put back, so that a failed build leaves the old output as it was.
+fn publish(moves: &[(PathBuf, PathBuf)]) -> anyhow::Result<()> {
+    for (i, (_, to)) in moves.iter().enumerate() {
+        if moves[..i].iter().any(|(_, earlier)| earlier == to) {
+            bail!("two of the files of this build would be written to {}; choose another output name", to.display());
+        }
+    }
+    // Each file a move replaces is kept next to it first, so that it can be put back.
+    let mut done: Vec<(&Path, &Path, Option<PathBuf>)> = Vec::new();
+    let mut failure = None;
+    for (from, to) in moves {
+        let kept = beside(to, ".thatch-old");
+        let had_old = to.exists() && std::fs::rename(to, &kept).is_ok();
+        match std::fs::rename(from, to) {
+            Ok(()) => done.push((from, to, had_old.then_some(kept))),
+            Err(e) => {
+                if had_old {
+                    let _ = std::fs::rename(&kept, to);
+                }
+                failure = Some(anyhow::Error::new(e).context(format!("could not write {}", to.display())));
+                break;
+            }
+        }
+    }
+    match failure {
+        None => {
+            for (_, _, kept) in done {
+                if let Some(kept) = kept {
+                    let _ = std::fs::remove_file(kept);
+                }
+            }
+            Ok(())
+        }
+        Some(error) => {
+            for (from, to, kept) in done.into_iter().rev() {
+                let _ = std::fs::rename(to, from);
+                if let Some(kept) = kept {
+                    let _ = std::fs::rename(kept, to);
+                }
+            }
+            Err(error)
+        }
+    }
 }
 
 /// The runtime library to link.
@@ -497,8 +618,8 @@ fn find_runtime_lib(given: Option<PathBuf>) -> anyhow::Result<RuntimeLib> {
     if let Some(path) = given {
         return Ok(RuntimeLib { path, beside_thatch: false });
     }
-    if let Ok(p) = std::env::var("THATCH_RUNTIME_LIB") {
-        return Ok(RuntimeLib { path: PathBuf::from(p), beside_thatch: false });
+    if let Some(path) = env_path("THATCH_RUNTIME_LIB") {
+        return Ok(RuntimeLib { path, beside_thatch: false });
     }
     let exe = std::env::current_exe().context("could not find the thatch executable")?;
     if let Some(path) = exe.parent().map(|d| d.join("libthatch_runtime.a")).filter(|p| p.exists()) {
