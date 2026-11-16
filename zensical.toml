@@ -13,6 +13,7 @@ nav = [
   { "Architecture" = "architecture.md" },
   { "The IR" = "ir.md" },
   { "The C ABI" = "abi.md" },
+  { "The Scratch Everywhere! host" = "scratch-everywhere.md" },
   { "Language features" = "language-features.md" },
   { "Roadmap" = "roadmap.md" },
 ]

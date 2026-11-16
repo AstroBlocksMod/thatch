@@ -1,0 +1,3 @@
+SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+project.json is a test project made for Thatch. JSON has no comments, so its license is named here.

@@ -1,0 +1,108 @@
+{
+  "targets": [
+    {
+      "isStage": true,
+      "name": "Stage",
+      "variables": {},
+      "lists": {},
+      "broadcasts": {"b1": "stage clicked"},
+      "blocks": {
+        "clicked": {"opcode": "event_whenstageclicked", "next": "tell", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 0},
+        "tell": {"opcode": "event_broadcast", "next": null, "parent": "clicked", "inputs": {"BROADCAST_INPUT": [1, [11, "stage clicked", "b1"]]}, "fields": {}, "shadow": false, "topLevel": false}
+      },
+      "comments": {},
+      "currentCostume": 0,
+      "costumes": [
+        {
+          "name": "backdrop1",
+          "dataFormat": "svg",
+          "assetId": "0db318f02bd0d7189fdeee764bd0968d",
+          "md5ext": "0db318f02bd0d7189fdeee764bd0968d.svg",
+          "rotationCenterX": 240,
+          "rotationCenterY": 180
+        }
+      ],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 0,
+      "tempo": 60,
+      "videoTransparency": 50,
+      "videoState": "on",
+      "textToSpeechLanguage": null
+    },
+    {
+      "isStage": false,
+      "name": "Cat",
+      "variables": {},
+      "lists": {},
+      "broadcasts": {},
+      "blocks": {
+        "flag": {"opcode": "event_whenflagclicked", "next": "right", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 0, "y": 0},
+        "right": {"opcode": "motion_gotoxy", "next": "sayx", "parent": "flag", "inputs": {"X": [1, [4, "1000"]], "Y": [1, [4, "0"]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "sayx": {"opcode": "looks_say", "next": "grow", "parent": "right", "inputs": {"MESSAGE": [3, "x1", [10, ""]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "x1": {"opcode": "motion_xposition", "next": null, "parent": "sayx", "inputs": {}, "fields": {}, "shadow": false, "topLevel": false},
+        "grow": {"opcode": "looks_setsizeto", "next": "saysize", "parent": "sayx", "inputs": {"SIZE": [1, [4, "1000"]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "saysize": {"opcode": "looks_say", "next": "corner", "parent": "grow", "inputs": {"MESSAGE": [3, "size1", [10, ""]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "size1": {"opcode": "looks_size", "next": null, "parent": "saysize", "inputs": {}, "fields": {}, "shadow": false, "topLevel": false},
+        "corner": {"opcode": "motion_gotoxy", "next": "sayx2", "parent": "saysize", "inputs": {"X": [1, [4, "-1000"]], "Y": [1, [4, "1000"]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "sayx2": {"opcode": "looks_say", "next": "sayy", "parent": "corner", "inputs": {"MESSAGE": [3, "x2", [10, ""]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "x2": {"opcode": "motion_xposition", "next": null, "parent": "sayx2", "inputs": {}, "fields": {}, "shadow": false, "topLevel": false},
+        "sayy": {"opcode": "looks_say", "next": "switch", "parent": "sayx2", "inputs": {"MESSAGE": [3, "y1", [10, ""]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "y1": {"opcode": "motion_yposition", "next": null, "parent": "sayy", "inputs": {}, "fields": {}, "shadow": false, "topLevel": false},
+        "switch": {"opcode": "looks_switchcostumeto", "next": "sayname", "parent": "sayy", "inputs": {"COSTUME": [1, "menu"]}, "fields": {}, "shadow": false, "topLevel": false},
+        "menu": {"opcode": "looks_costume", "next": null, "parent": "switch", "inputs": {}, "fields": {"COSTUME": ["b", null]}, "shadow": true, "topLevel": false},
+        "sayname": {"opcode": "looks_say", "next": "home", "parent": "switch", "inputs": {"MESSAGE": [3, "name1", [10, ""]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "name1": {"opcode": "looks_costumenumbername", "next": null, "parent": "sayname", "inputs": {}, "fields": {"NUMBER_NAME": ["name", null]}, "shadow": false, "topLevel": false},
+        "home": {"opcode": "motion_gotoxy", "next": "shrink", "parent": "sayname", "inputs": {"X": [1, [4, "-120"]], "Y": [1, [4, "-40"]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "shrink": {"opcode": "looks_setsizeto", "next": "done", "parent": "home", "inputs": {"SIZE": [1, [4, "100"]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "done": {"opcode": "looks_think", "next": "loop", "parent": "shrink", "inputs": {"MESSAGE": [1, [10, "done"]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "loop": {"opcode": "control_forever", "next": null, "parent": "done", "inputs": {"SUBSTACK": [2, "turn"]}, "fields": {}, "shadow": false, "topLevel": false},
+        "turn": {"opcode": "motion_turnright", "next": null, "parent": "loop", "inputs": {"DEGREES": [1, [4, "3"]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "key": {"opcode": "event_whenkeypressed", "next": "step", "parent": null, "inputs": {}, "fields": {"KEY_OPTION": ["space", null]}, "shadow": false, "topLevel": true, "x": 300, "y": 0},
+        "step": {"opcode": "motion_changexby", "next": "sayx3", "parent": "key", "inputs": {"DX": [1, [4, "20"]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "sayx3": {"opcode": "looks_say", "next": null, "parent": "step", "inputs": {"MESSAGE": [3, "x3", [10, ""]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "x3": {"opcode": "motion_xposition", "next": null, "parent": "sayx3", "inputs": {}, "fields": {}, "shadow": false, "topLevel": false},
+        "heard": {"opcode": "event_whenbroadcastreceived", "next": "saystage", "parent": null, "inputs": {}, "fields": {"BROADCAST_OPTION": ["stage clicked", "b1"]}, "shadow": false, "topLevel": true, "x": 900, "y": 0},
+        "saystage": {"opcode": "looks_say", "next": null, "parent": "heard", "inputs": {"MESSAGE": [1, [10, "the stage was clicked"]]}, "fields": {}, "shadow": false, "topLevel": false},
+        "click": {"opcode": "event_whenthisspriteclicked", "next": "next", "parent": null, "inputs": {}, "fields": {}, "shadow": false, "topLevel": true, "x": 600, "y": 0},
+        "next": {"opcode": "looks_nextcostume", "next": "hi", "parent": "click", "inputs": {}, "fields": {}, "shadow": false, "topLevel": false},
+        "hi": {"opcode": "looks_sayforsecs", "next": null, "parent": "next", "inputs": {"MESSAGE": [1, [10, "Hello!"]], "SECS": [1, [4, "2"]]}, "fields": {}, "shadow": false, "topLevel": false}
+      },
+      "comments": {},
+      "currentCostume": 0,
+      "costumes": [
+        {
+          "name": "a",
+          "bitmapResolution": 1,
+          "dataFormat": "svg",
+          "assetId": "06754cd5923d17e7e8b6fe8abc50d0c1",
+          "md5ext": "06754cd5923d17e7e8b6fe8abc50d0c1.svg",
+          "rotationCenterX": 50,
+          "rotationCenterY": 50
+        },
+        {
+          "name": "b",
+          "bitmapResolution": 1,
+          "dataFormat": "svg",
+          "assetId": "9c1cdd53ca1efcbd701190d4928211e1",
+          "md5ext": "9c1cdd53ca1efcbd701190d4928211e1.svg",
+          "rotationCenterX": 50,
+          "rotationCenterY": 50
+        }
+      ],
+      "sounds": [],
+      "volume": 100,
+      "layerOrder": 1,
+      "visible": true,
+      "x": 0,
+      "y": 0,
+      "size": 100,
+      "direction": 90,
+      "draggable": false,
+      "rotationStyle": "all around"
+    }
+  ],
+  "monitors": [],
+  "extensions": [],
+  "meta": {"semver": "3.0.0", "vm": "0.2.0", "agent": "Thatch test project"}
+}

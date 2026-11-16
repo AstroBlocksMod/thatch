@@ -1,0 +1,37 @@
+SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+The Thatch host on Scratch Everywhere!
+======================================
+
+The files in this directory are under two licenses. Every file says which one applies to it in a
+line that starts with "SPDX-License-Identifier:", in the file itself or, where the format has no
+comments, in a file of the same name with ".license" added.
+
+1. The GNU Lesser General Public License, version 3
+
+   ScratchEverywhere/
+       Scratch Everywhere! (https://github.com/ScratchEverywhere/ScratchEverywhere), pinned as a
+       git submodule. It is the work of its contributors and is licensed under the GNU Lesser
+       General Public License, version 3 (SPDX: LGPL-3.0-only). Its license text is
+       ScratchEverywhere/LICENSE, which builds on the GNU General Public License, version 3.
+
+   patches/
+       Changes to Scratch Everywhere!. A patch modifies the library, so it is under the library's
+       license: the GNU Lesser General Public License, version 3 or any later version
+       (SPDX: LGPL-3.0-or-later).
+
+2. The Apache License 2.0 with LLVM exceptions, the license of the rest of Thatch
+
+   Everything else here: adapter/, tests/, CMakeLists.txt, README.md and this file
+   (SPDX: Apache-2.0 WITH LLVM-exception). The license text is ../../LICENSE.
+
+   The adapter is the program that uses the library. It includes the library's headers and calls
+   its functions, and it contains no code copied from the library.
+
+Nothing outside this directory is derived from, includes or depends on anything inside it, and
+tools/check-hosts.sh, which CI runs, keeps it that way. This directory is not part of the Cargo
+workspace and is never published to crates.io.
+
+What this means for a game built with this host is described in docs/scratch-everywhere.md: the
+game's own code can be under any license, and the library ships next to it as a shared library
+that whoever gets the game can replace.

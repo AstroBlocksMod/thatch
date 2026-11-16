@@ -1,5 +1,6 @@
 /target
 /site
+/hosts/*/build/
 *.o
 /tools/scratch-vm-oracle/node_modules
 .claude/worktrees/
