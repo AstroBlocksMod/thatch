@@ -1382,7 +1382,11 @@ mod tests {
             // to nothing, so that every frame would end after its first pass.
             assert!(!(*r).set_stage(Stage { width: 480.0, height: 360.0, frame_rate: 1e-30 }));
             assert!(!(*r).set_stage(Stage { width: 480.0, height: 360.0, frame_rate: 1e30 }));
-            assert_eq!(thatch_runtime_stage_width(rt), 480.0);
+            assert_eq!(
+                (thatch_runtime_stage_width(rt), thatch_runtime_stage_height(rt), thatch_runtime_frame_rate(rt)),
+                (480.0, 360.0, 30.0),
+                "a refused stage leaves the one before it"
+            );
             assert!((*r).set_stage(Stage { width: 640.0, height: 400.0, frame_rate: 50.0 }));
             assert_eq!(
                 (thatch_runtime_stage_width(rt), thatch_runtime_stage_height(rt), thatch_runtime_frame_rate(rt)),
