@@ -97,11 +97,6 @@ set(SE_AUDIO_ENGINE "sdl2" CACHE STRING "The audio engine of Scratch Everywhere!
 # install packages on the system. It builds what the system lacks from source instead.
 set(ENV{CATALOG_NON_INTERACTIVE} 1)
 
-# build/compile_commands.json lists the include directories of every library compiled into
-# Scratch Everywhere!, which is how the docs find their license notices. Makefile and Ninja
-# generators write it.
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
 add_subdirectory("${SE_PATCHED}" scratch-everywhere-build EXCLUDE_FROM_ALL)
 
 set(HOST_LIB_DIR "${CMAKE_CURRENT_BINARY_DIR}/lib")
@@ -131,6 +126,24 @@ if(WIN32)
     target_compile_definitions(thatch-host-scratch-everywhere PRIVATE SE_DLL)
 endif()
 add_dependencies(thatch-host-scratch-everywhere scratch-everywhere)
+
+# The directories the library's build uses, one per line: every directory CMake entered for it,
+# and every include directory it compiles with. The libraries built into it are among them, which
+# is how the docs find their license notices.
+function(thatch_collect_directories dir out)
+    set(found "${dir}")
+    get_property(children DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
+    foreach(child IN LISTS children)
+        thatch_collect_directories("${child}" more)
+        list(APPEND found ${more})
+    endforeach()
+    set(${out} "${found}" PARENT_SCOPE)
+endfunction()
+thatch_collect_directories("${SE_PATCHED}" SE_DIRECTORIES)
+list(JOIN SE_DIRECTORIES "\n" SE_DIRECTORY_LINES)
+set(SE_SOURCE_DIRS_FILE "${CMAKE_CURRENT_BINARY_DIR}/scratch-everywhere-dirs.txt")
+file(GENERATE OUTPUT "${SE_SOURCE_DIRS_FILE}" CONTENT
+    "${SE_DIRECTORY_LINES}\n$<JOIN:$<TARGET_PROPERTY:scratch-everywhere,INCLUDE_DIRECTORIES>,\n>\n")
 
 add_custom_target(thatch-host ALL DEPENDS scratch-everywhere thatch-host-scratch-everywhere)
 
