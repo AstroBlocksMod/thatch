@@ -97,6 +97,11 @@ set(SE_AUDIO_ENGINE "sdl2" CACHE STRING "The audio engine of Scratch Everywhere!
 # install packages on the system. It builds what the system lacks from source instead.
 set(ENV{CATALOG_NON_INTERACTIVE} 1)
 
+# build/compile_commands.json lists the include directories of every library compiled into
+# Scratch Everywhere!, which is how the docs find their license notices. Makefile and Ninja
+# generators write it.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 add_subdirectory("${SE_PATCHED}" scratch-everywhere-build EXCLUDE_FROM_ALL)
 
 set(HOST_LIB_DIR "${CMAKE_CURRENT_BINARY_DIR}/lib")

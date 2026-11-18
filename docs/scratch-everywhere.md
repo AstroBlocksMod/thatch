@@ -72,6 +72,16 @@ mkdir -p dist/licenses
 cp target/debug/libthatch_runtime.licenses.txt dist/licenses/thatch-runtime.txt
 cp hosts/scratch-everywhere/ScratchEverywhere/LICENSE dist/licenses/LGPL-3.0.txt
 cp "$(rustc --print sysroot)/share/doc/rust/licenses/GPL-3.0-or-later.txt" dist/licenses/GPL-3.0.txt
+
+# The libraries compiled into Scratch Everywhere!: every include directory in Catalog's cache
+jq -r '.[].command' hosts/scratch-everywhere/build/compile_commands.json |
+    grep -oE '(-I|-isystem )/[^ ]*/catalog/src_[0-9a-f]+' | sed -E 's/^(-I|-isystem )//' | sort -u |
+    while read -r dir; do
+        mkdir -p "dist/licenses/$(basename "$dir")"
+        for f in "$dir"/LICEN[CS]E* "$dir"/COPYING* "$dir"/src/LICEN[CS]E* "$dir"/src/COPYING*; do
+            if [ -f "$f" ]; then cp "$f" "dist/licenses/$(basename "$dir")/"; fi
+        done
+    done
 ```
 
 The rpath makes the game look for the library in its own directory, wherever it is started from, so the library is copied next to it. The license texts go along with it:
@@ -79,7 +89,9 @@ The rpath makes the game look for the library in its own directory, wherever it 
 - the runtime's notices, which building the Cargo workspace writes next to `libthatch_runtime.a` (see [getting started](getting-started.md#licenses-of-a-built-executable));
 - the LGPL, version 3, which is the `LICENSE` file of the Scratch Everywhere! submodule;
 - the GPL, version 3, which the LGPL builds on. A Rust toolchain installed with rustup comes with its text in `share/doc/rust/licenses/`; the Free Software Foundation also publishes it at <https://www.gnu.org/licenses/gpl-3.0.txt>;
-- the notices of the libraries built into Scratch Everywhere! These are lunasvg, plutovg, nlohmann/json, miniz, the stb libraries, dr_libs, TinySoundFont, Ryu, expected-lite, libdlgmod, `__getexecname` and bundle.cmake, as the host's configure step lists them (`[Catalog] NAME: resolved via source`). Their license files are in the source directories Catalog unpacked them to, `~/.cache/catalog/src_*/` (some one level down, in `src/`). Copy each into `dist/licenses/`. bundle.cmake has none upstream.
+- the notices of the libraries compiled into Scratch Everywhere!: lunasvg, plutovg, nlohmann/json, miniz, the stb libraries, dr_libs, TinySoundFont, Ryu, expected-lite, libdlgmod, `__getexecname` and bundle.cmake. Catalog, which fetches them, unpacks each into a directory of its own in its cache (`~/.cache/catalog/src_<hash>`), and the host's build writes the compile commands of the library to `hosts/scratch-everywhere/build/compile_commands.json`, so the last step of the recipe takes the directories from there and copies each one's license files into a folder of `dist/licenses/` named after that directory. That finds exactly what was compiled in, not whatever else the cache holds. bundle.cmake has no license file upstream, so its folder stays empty.
+
+SDL2 is not among them: the library loads it from the system it runs on, so it is not part of the game. If you ship SDL2 with the game, add its zlib license too, which comes with SDL2 as `LICENSE.txt` (`$(brew --prefix sdl2-compat)/LICENSE.txt` with Homebrew) or as `/usr/share/doc/libsdl2-2.0-0/copyright` on Debian and Ubuntu.
 
 Add the statement the LGPL asks for, that the game uses Scratch Everywhere! and that the library is covered by the LGPL (see [Licenses](#licenses)). On Linux add the libraries the runtime needs from the system: `-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc`; on macOS, `-liconv`. `thatch build --host scratch-everywhere` will do all of this in one step; it is the next item on the roadmap.
 
@@ -112,4 +124,4 @@ Your game's own code stays yours, under any license you like: the LGPL makes no 
 - offer the source code of the library as it was built: the pinned commit of Scratch Everywhere! and `patches/host-hooks.patch`;
 - not forbid changing the library, or reverse engineering the game to debug such changes, in the game's own license terms.
 
-These come on top of the [notices of the Thatch runtime](getting-started.md#licenses-of-a-built-executable). The libraries Scratch Everywhere! is itself built from (SDL2, lunasvg, nlohmann/json and others) have notices of their own, which belong with the game as well. This page is a summary to get you started, not legal advice; the license texts are what counts.
+These come on top of the [notices of the Thatch runtime](getting-started.md#licenses-of-a-built-executable). The libraries compiled into Scratch Everywhere! (lunasvg, nlohmann/json and others) have notices of their own, which belong with the game as well; [Building a game](#building-a-game) shows how to gather them. SDL2 comes from the system and needs its notice only if you ship it with the game. This page is a summary to get you started, not legal advice; the license texts are what counts.
