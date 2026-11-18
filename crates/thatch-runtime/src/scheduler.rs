@@ -224,8 +224,11 @@ impl Runtime {
             return false;
         }
         self.stage = stage;
-        self.mouse_x = Stage::round_into(self.mouse_x, stage.width / 2.0);
-        self.mouse_y = Stage::round_into(self.mouse_y, stage.height / 2.0);
+        // Only clamped: the mouse was rounded when it was reported, and has not moved since, so a
+        // point that is still on the stage stays exactly where it was.
+        let (half_w, half_h) = (stage.width / 2.0, stage.height / 2.0);
+        self.mouse_x = thatch_values::clamp(self.mouse_x, -half_w, half_w);
+        self.mouse_y = thatch_values::clamp(self.mouse_y, -half_h, half_h);
         true
     }
 

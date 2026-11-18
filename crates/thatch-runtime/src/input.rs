@@ -189,6 +189,9 @@ mod tests {
             assert!((*rt).set_stage(Stage { width: 81.4, height: 50.0, frame_rate: 60.0 }));
             (*rt).mouse_move(-1000.0, 0.0);
             assert_eq!((*rt).mouse_x, -40.7);
+            // A wider stage leaves a mouse that still fits where it is, unrounded.
+            assert!((*rt).set_stage(Stage { width: 100.0, height: 50.0, frame_rate: 60.0 }));
+            assert_eq!((*rt).mouse_x, -40.7);
             Runtime::destroy(rt);
         }
     }
