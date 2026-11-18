@@ -65,11 +65,23 @@ c++ -o dist/game dist/game.o \
     -Lhosts/scratch-everywhere/build/lib -lscratch-everywhere \
     -Wl,-rpath,@executable_path        # on Linux: -Wl,-rpath,'$ORIGIN'
 cp hosts/scratch-everywhere/build/lib/libscratch-everywhere.* game.sb3 dist/
-cp target/debug/libthatch_runtime.licenses.txt dist/game.licenses.txt
 dist/game dist/game.sb3
+
+# The license texts that ship with the game (see Licenses below)
+mkdir -p dist/licenses
+cp target/debug/libthatch_runtime.licenses.txt dist/licenses/thatch-runtime.txt
+cp hosts/scratch-everywhere/ScratchEverywhere/LICENSE dist/licenses/LGPL-3.0.txt
+cp "$(rustc --print sysroot)/share/doc/rust/licenses/GPL-3.0-or-later.txt" dist/licenses/GPL-3.0.txt
 ```
 
-The rpath makes the game look for the library in its own directory, wherever it is started from, so the library is copied next to it. The runtime's license notices go along too (see [getting started](getting-started.md#licenses-of-a-built-executable)), and so do the host's own (see [Licenses](#licenses)). On Linux add the libraries the runtime needs from the system: `-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc`; on macOS, `-liconv`. `thatch build --host scratch-everywhere` will do all of this in one step; it is the next item on the roadmap.
+The rpath makes the game look for the library in its own directory, wherever it is started from, so the library is copied next to it. The license texts go along with it:
+
+- the runtime's notices, which building the Cargo workspace writes next to `libthatch_runtime.a` (see [getting started](getting-started.md#licenses-of-a-built-executable));
+- the LGPL, version 3, which is the `LICENSE` file of the Scratch Everywhere! submodule;
+- the GPL, version 3, which the LGPL builds on. A Rust toolchain installed with rustup comes with its text in `share/doc/rust/licenses/`; the Free Software Foundation also publishes it at <https://www.gnu.org/licenses/gpl-3.0.txt>;
+- the notices of the libraries built into Scratch Everywhere! These are lunasvg, plutovg, nlohmann/json, miniz, the stb libraries, dr_libs, TinySoundFont, Ryu, expected-lite, libdlgmod, `__getexecname` and bundle.cmake, as the host's configure step lists them (`[Catalog] NAME: resolved via source`). Their license files are in the source directories Catalog unpacked them to, `~/.cache/catalog/src_*/` (some one level down, in `src/`). Copy each into `dist/licenses/`. bundle.cmake has none upstream.
+
+Add the statement the LGPL asks for, that the game uses Scratch Everywhere! and that the library is covered by the LGPL (see [Licenses](#licenses)). On Linux add the libraries the runtime needs from the system: `-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc`; on macOS, `-liconv`. `thatch build --host scratch-everywhere` will do all of this in one step; it is the next item on the roadmap.
 
 The game takes the project file as its argument, since the costumes are read from it at run time. Without an argument it looks for a file named like the executable with `.sb3` added. `--frames N` stops after N frames, `--seed N` seeds `pick random`, `--print-bubbles` also prints every bubble as the headless host does, and `--input FILE` plays a script of key and mouse events in the format of `thatch run --input` on top of the real keyboard and mouse.
 
