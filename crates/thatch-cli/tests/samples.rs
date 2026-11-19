@@ -240,6 +240,44 @@ fn without_the_host_an_sb3_runs_headless_with_a_note() {
     assert!(!output.status.success() && stderr.contains("cannot be used") && stderr.contains("libgone.a"), "{stderr}");
     assert!(!stderr.contains("note:"), "{stderr}");
 
+    // A bare project.json is headless whatever it is called, since it is no archive the host
+    // could read: the broken host is not even looked at.
+    let raw = dir.path().join("raw.sb3");
+    std::fs::copy(samples_dir().join("hello/project.json"), &raw).expect("the project is copied");
+    let output = thatch()
+        .arg("run")
+        .arg(&raw)
+        .env("THATCH_HOST_DIR", &broken)
+        .env("THATCH_HOME", &nowhere)
+        .output()
+        .expect("thatch runs");
+    assert!(output.status.success() && output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected("hello"));
+
+    // A host directory that cannot be looked into may hold the host that was meant, so it is an
+    // error, not a reason to go without a window. (Not for root, who can look anyway.)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let locked = dir.path().join("locked");
+        std::fs::create_dir(&locked).expect("the directory is created");
+        std::fs::write(locked.join("thatch-host.txt"), "adapter = libgone.a\n").expect("a description");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).expect("locked");
+        if std::fs::metadata(locked.join("thatch-host.txt")).is_err() {
+            let output = thatch()
+                .arg("run")
+                .arg(&sb3)
+                .env("THATCH_HOST_DIR", &locked)
+                .env("THATCH_HOME", &nowhere)
+                .output()
+                .expect("thatch runs");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success() && stderr.contains("could not look at"), "{stderr}");
+            assert!(!stderr.contains("note:"), "{stderr}");
+        }
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).expect("unlocked");
+    }
+
     // --timing measures the in-memory run, so without a host asked for, it runs headless quietly.
     let timed = run(&["--timing"]);
     let stderr = String::from_utf8_lossy(&timed.stderr);
@@ -379,6 +417,13 @@ fn a_build_for_a_host_follows_the_hosts_description() {
     let refused = build(&project, dir);
     let stderr = String::from_utf8_lossy(&refused.stderr);
     assert!(!refused.status.success() && stderr.contains(".sb3 file"), "{stderr}");
+    // The format is told by the content: a project.json named .sb3 is no archive either.
+    let raw = out_dir.path().join("raw.sb3");
+    std::fs::copy(&project, &raw).expect("the project is copied");
+    let refused = build(&raw, dir);
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(!refused.status.success() && stderr.contains("bare project.json"), "{stderr}");
+    std::fs::remove_file(&raw).expect("removed");
     // A host that was not built is an error that says where it was looked for.
     let missing = build(&project, &dir.join("nowhere"));
     let stderr = String::from_utf8_lossy(&missing.stderr);
@@ -421,6 +466,25 @@ fn a_build_for_a_host_follows_the_hosts_description() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success() && stderr.contains("two of the files"), "{stderr}");
     assert_eq!(std::fs::read(&clash).expect("still there"), before, "nothing was replaced");
+    // Where the file system does not tell names apart by case (as macOS by default), a name that
+    // differs from the library's only in case is the same file, and the build is undone.
+    let upper = out_dir.path().join(shipped.to_uppercase());
+    if upper.exists() {
+        let output = thatch()
+            .arg("build")
+            .arg(&project)
+            .args(["--host", "made-up", "--host-dir"])
+            .arg(dir)
+            .arg("--runtime-lib")
+            .arg(&runtime_lib)
+            .arg("-o")
+            .arg(&upper)
+            .output()
+            .expect("thatch builds");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && stderr.contains("the same name"), "{stderr}");
+        assert_eq!(std::fs::read(&clash).expect("still there"), before, "the library was put back");
+    }
 
     let build_into = |project: &Path, out: &Path| {
         thatch()
@@ -460,6 +524,26 @@ fn a_build_for_a_host_follows_the_hosts_description() {
     assert_eq!(std::fs::read(&own).expect("the project"), std::fs::read(&project).expect("the sample"));
     let ran = Command::new(own_dir.path().join("game")).arg("--frames").arg("3000").output().expect("the game runs");
     check_output("hello", "made-up host, project in place", &ran);
+    // No file of the build may replace the project, which would be lost: not the executable,
+    let output = build_into(&own, &own);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("is the project being built"), "{stderr}");
+    assert_eq!(std::fs::read(&own).expect("the project"), std::fs::read(&project).expect("the sample"));
+    // and not a host library loaded under the project's name, while the project stays in place.
+    let own_c = dir.join("own.c");
+    std::fs::write(&own_c, "int thatch_test_own(void) { return 9; }\n").expect("the source is written");
+    let own_option =
+        if cfg!(target_os = "macos") { "-Wl,-install_name,@rpath/game.json" } else { "-Wl,-soname,game.json" };
+    run_ok(
+        Command::new("cc").args(["-shared", "-fPIC", own_option, "-o"]).arg(dir.join("libown.so")).arg(&own_c),
+        "cc -shared",
+    );
+    std::fs::write(dir.join("thatch-host.txt"), format!("{manifest}library = libown.so\n")).expect("rewritten");
+    let output = build_into(&own, &own_dir.path().join("game"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("is the project being built"), "{stderr}");
+    assert_eq!(std::fs::read(&own).expect("the project"), std::fs::read(&project).expect("the sample"));
+    std::fs::write(dir.join("thatch-host.txt"), &manifest).expect("rewritten");
 
     // A host library may have any name the notices might have had in the build's own directory.
     let named_c = dir.join("named.c");
@@ -503,6 +587,30 @@ fn a_build_for_a_host_follows_the_hosts_description() {
         let output = build_into(&project, &named_dir.path().join("fixed"));
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success() && stderr.contains("@rpath/libfixed.dylib"), "{stderr}");
+        // A universal library ships under one name, so each of its architectures has to give it
+        // that name.
+        for (arch, name) in [("arm64", "liba.dylib"), ("x86_64", "libb.dylib")] {
+            run_ok(
+                Command::new("cc")
+                    .args(["-arch", arch, "-shared", &format!("-Wl,-install_name,@rpath/{name}"), "-o"])
+                    .arg(dir.join(format!("{arch}.dylib")))
+                    .arg(&named_c),
+                "cc -shared",
+            );
+        }
+        run_ok(
+            Command::new("lipo")
+                .arg("-create")
+                .arg(dir.join("arm64.dylib"))
+                .arg(dir.join("x86_64.dylib"))
+                .arg("-output")
+                .arg(dir.join("libfat.dylib")),
+            "lipo",
+        );
+        std::fs::write(dir.join("thatch-host.txt"), format!("{manifest}library = libfat.dylib\n")).expect("rewritten");
+        let output = build_into(&project, &named_dir.path().join("fat"));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && stderr.contains("different install names"), "{stderr}");
     }
     std::fs::write(dir.join("thatch-host.txt"), &manifest).expect("rewritten");
 
@@ -531,17 +639,34 @@ fn thatch_run_ends_the_game_it_was_interrupted_for() {
     let host_dir = temp_out_dir("interrupt-host");
     c_adapter(host_dir.path());
     std::fs::write(host_dir.path().join("thatch-host.txt"), "adapter = libadapter.a\n").expect("the description");
-    // A script that never ends, so the game runs until it is ended.
+    // A script that says it has started and then never ends, so the game runs until it is ended.
     let project = host_dir.path().join("forever.json");
     std::fs::write(
         &project,
-        r#"{"targets":[{"isStage":true,"name":"Stage","variables":{},"lists":{},"broadcasts":{},"blocks":{
-            "flag":{"opcode":"event_whenflagclicked","next":"loop","parent":null,"inputs":{},"fields":{},"shadow":false,"topLevel":true,"x":0,"y":0},
-            "loop":{"opcode":"control_forever","next":null,"parent":"flag","inputs":{},"fields":{},"shadow":false,"topLevel":false}},
-            "currentCostume":0,"costumes":[],"sounds":[],"volume":100,"layerOrder":0}],
+        r#"{"targets":[{"isStage":true,"name":"Stage","variables":{},"lists":{},"broadcasts":{},"blocks":{},
+            "currentCostume":0,"costumes":[],"sounds":[],"volume":100,"layerOrder":0},
+            {"isStage":false,"name":"Cat","variables":{},"lists":{},"broadcasts":{},"blocks":{
+            "flag":{"opcode":"event_whenflagclicked","next":"say","parent":null,"inputs":{},"fields":{},"shadow":false,"topLevel":true,"x":0,"y":0},
+            "say":{"opcode":"looks_say","next":"loop","parent":"flag","inputs":{"MESSAGE":[1,[10,"started"]]},"fields":{},"shadow":false,"topLevel":false},
+            "loop":{"opcode":"control_forever","next":null,"parent":"say","inputs":{},"fields":{},"shadow":false,"topLevel":false}},
+            "currentCostume":0,"costumes":[],"sounds":[],"volume":100,"layerOrder":1,"visible":true,"x":0,"y":0,
+            "size":100,"direction":90,"draggable":false,"rotationStyle":"all around"}],
             "monitors":[],"extensions":[],"meta":{"semver":"3.0.0"}}"#,
     )
     .expect("the project is written");
+
+    /// thatch in a process group of its own. If the test fails while thatch has not been reaped,
+    /// the group is ended with everything in it, the game included, so that no game outlives the
+    /// test. Once thatch has been reaped, its id may be taken again, so nothing is sent.
+    struct Group(std::process::Child);
+    impl Drop for Group {
+        fn drop(&mut self) {
+            if let Ok(None) = self.0.try_wait() {
+                let _ = Command::new("kill").args(["-KILL", "--", &format!("-{}", self.0.id())]).status();
+                let _ = self.0.wait();
+            }
+        }
+    }
 
     for (signal_group, expected) in [(false, 128 + 9), (true, 128 + 2)] {
         let temp = temp_out_dir("interrupt-temp");
@@ -556,20 +681,24 @@ fn thatch_run_ends_the_game_it_was_interrupted_for() {
             .env("TMPDIR", temp.path())
             // A process group of its own, which the interrupt goes to as Ctrl-C sends it to the
             // terminal's foreground group.
-            .process_group(0);
-        let mut thatch = command.spawn().expect("thatch runs");
-        // Until the game has been built and started.
-        let started = Instant::now();
-        while std::fs::read_dir(temp.path()).expect("the temporary directory").next().is_none() {
-            assert!(started.elapsed() < Duration::from_secs(60), "the game did not start");
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        std::thread::sleep(Duration::from_millis(500));
-        let target = if signal_group { format!("-{}", thatch.id()) } else { thatch.id().to_string() };
+            .process_group(0)
+            .stdout(std::process::Stdio::piped());
+        let mut thatch = Group(command.spawn().expect("thatch runs"));
+        // Until the game has been built and has said that it started.
+        let stdout = thatch.0.stdout.take().expect("the game's output");
+        let (lines, said) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in std::io::BufRead::lines(std::io::BufReader::new(stdout)) {
+                let _ = lines.send(line);
+            }
+        });
+        let line = said.recv_timeout(Duration::from_secs(60)).expect("the game started");
+        assert_eq!(line.expect("a line"), "Cat says: started");
+        let target = if signal_group { format!("-{}", thatch.0.id()) } else { thatch.0.id().to_string() };
         run_ok(Command::new("kill").args(["-INT", "--", &target]), "kill");
         let interrupted = Instant::now();
         let status = loop {
-            if let Some(status) = thatch.try_wait().expect("thatch is waited for") {
+            if let Some(status) = thatch.0.try_wait().expect("thatch is waited for") {
                 break status;
             }
             assert!(interrupted.elapsed() < Duration::from_secs(20), "the game did not end");
