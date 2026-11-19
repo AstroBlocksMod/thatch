@@ -108,7 +108,7 @@ SDL2 is not in the game: the library loads it from the system it runs on. If you
 
 Add the statement the LGPL asks for, that the game uses Scratch Everywhere! and that the library is covered by the LGPL (see [Licenses](#licenses)). `thatch build --host scratch-everywhere` will do all of this in one step; it is the next item on the roadmap.
 
-The game takes the project file as its argument, since the costumes are read from it at run time. Without an argument it looks for a file named like the executable with `.sb3` added. `--frames N` stops after N frames, `--seed N` seeds `pick random`, `--print-bubbles` also prints every bubble as the headless host does, and `--input FILE` plays a script of key and mouse events in the format of `thatch run --input` on top of the real keyboard and mouse.
+The game takes the project file as its argument, since the costumes are read from it at run time. Without an argument it looks for a file named like the executable with `.sb3` added. `--frames N` stops after N frames, `--seed N` seeds `pick random`, `--print-bubbles` also prints every bubble as the headless host does, and `--input FILE` plays a script of key and mouse events in the format of `thatch run --input` on top of the real keyboard and mouse. A `mouse down` or `mouse up` that names a target goes to that target wherever the pointer is, as in the headless host, so a script plays the same on both; without a name it goes to what is under the pointer.
 
 ## How it fits together
 

@@ -23,3 +23,8 @@
 # A key that goes down and up before the same frame still counts as a press.
 40 key down space
 40 key up space
+
+# A click that names its target goes to it wherever the pointer is, as in the headless host:
+# the pointer is still over the empty stage, but the Cat is clicked.
+46 mouse down Cat
+48 mouse up Cat

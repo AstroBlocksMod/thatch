@@ -8,3 +8,4 @@ Cat says: -100
 Cat says: Hello!
 Cat says: the stage was clicked
 Cat says: -80
+Cat says: Hello!

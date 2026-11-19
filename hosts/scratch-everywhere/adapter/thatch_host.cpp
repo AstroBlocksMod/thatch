@@ -53,6 +53,8 @@ struct ScriptedInput {
     uint64_t frame = 0;
     enum { Key, MouseMove, MouseButton } kind = Key;
     std::string key;
+    /// The target a mouse button event is for; empty for the one under the pointer.
+    std::string target;
     bool down = false;
     double x = 0;
     double y = 0;
@@ -278,6 +280,18 @@ int64_t targetAt(Host &host, double x, double y) {
     return host.stage;
 }
 
+/// The target called `name`, or -1. Scratch keeps sprite names unique, and the stage's name is
+/// never a sprite's.
+int64_t targetNamed(Host &host, const std::string &name) {
+    const int64_t count = thatch_runtime_target_count(host.rt);
+    for (int64_t target = 0; target < count; target++) {
+        size_t len = 0;
+        const char *found = thatch_runtime_target_name(host.rt, target, &len);
+        if (found != nullptr && std::string(found, len) == name) return target;
+    }
+    return -1;
+}
+
 /// Plays the events of the input script that are due before `frame`, each one in turn, as the
 /// headless host does: two events for the same key in one frame are two events, and the runtime
 /// names the keys, so "left arrow" releases what "ArrowLeft" pressed. A key held by the script
@@ -296,11 +310,16 @@ void playScript(Host &host, uint64_t frame) {
             host.scriptMouseY = event.y;
             thatch_runtime_mouse_move(host.rt, event.x, event.y);
             break;
-        case ScriptedInput::MouseButton:
+        case ScriptedInput::MouseButton: {
             host.scriptMouse = true;
             host.mouseDown = event.down;
-            thatch_runtime_mouse_button(host.rt, event.down ? 1 : 0, targetAt(host, host.scriptMouseX, host.scriptMouseY), 0);
+            // A target the script names gets the event wherever the pointer is, as in the
+            // headless host, so a script plays the same on both.
+            const int64_t target = event.target.empty() ? targetAt(host, host.scriptMouseX, host.scriptMouseY)
+                                                        : targetNamed(host, event.target);
+            thatch_runtime_mouse_button(host.rt, event.down ? 1 : 0, target, 0);
             break;
+        }
         }
     }
 }
@@ -425,10 +444,10 @@ std::string nextWord(const std::string &line, size_t &pos) {
 ///     8 key up space
 ///     20 mouse 100 -50
 ///     21 mouse down
-///     25 mouse up
+///     25 mouse up Cat
 ///
-/// A target named after `mouse down` or `mouse up` is ignored: this host finds what is under the
-/// pointer itself. Returns false after printing what is wrong.
+/// `mouse down` and `mouse up` go to the target named after them, the rest of the line, and
+/// without a name to the one under the pointer. Returns false after printing what is wrong.
 bool readInputScript(const std::string &path, std::vector<ScriptedInput> &events) {
     std::ifstream file(path);
     if (!file) {
@@ -454,6 +473,8 @@ bool readInputScript(const std::string &path, std::vector<ScriptedInput> &events
             if (first == "down" || first == "up") {
                 event.kind = ScriptedInput::MouseButton;
                 event.down = first == "down";
+                // The rest of the line, so that "Sprite 1" stays one name.
+                if (pos < line.size()) event.target = line.substr(pos, line.find_last_not_of(" \t\r") + 1 - pos);
             } else {
                 event.kind = ScriptedInput::MouseMove;
                 const std::string second = nextWord(line, pos);
@@ -544,6 +565,14 @@ bool start(Host &host, ThatchHost &table, const Options &options) {
         return false;
     }
     if (!pairTargets(host)) return false;
+    // A target the project lacks is a mistake in the script, not a click outside the stage.
+    for (const ScriptedInput &event : host.script) {
+        if (event.kind == ScriptedInput::MouseButton && !event.target.empty() && targetNamed(host, event.target) < 0) {
+            std::fprintf(stderr, "error: the input script clicks \"%s\", which the project has no target named\n",
+                         event.target.c_str());
+            return false;
+        }
+    }
 
     // From here on the library hands over every hat it would have started.
     HostHooks::setStartHat(hostStartHat, &host);
