@@ -62,9 +62,11 @@ enum Cmd {
         #[arg(long, requires = "object")]
         no_main: bool,
         /// The runtime library to link against. Defaults to $THATCH_RUNTIME_LIB, then
-        /// libthatch_runtime.a next to this executable, then the one installed with a host (see
-        /// --host-dir). Its license notices are expected next to it, with the extension
-        /// .licenses.txt in place of .a, where building the runtime puts them.
+        /// libthatch_runtime.a next to this executable, then lib/libthatch_runtime.a in Thatch's
+        /// data directory, where installing a host puts one. --host-dir does not change where it
+        /// is looked for; pass this for a runtime library somewhere else. Its license notices are
+        /// expected next to it, with the extension .licenses.txt in place of .a, where building
+        /// the runtime puts them.
         #[arg(long)]
         runtime_lib: Option<PathBuf>,
         /// The host the game runs on. `scratch-everywhere` opens a window and draws the stage; it
