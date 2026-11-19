@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, bail};
+use anyhow::{Context, anyhow, bail};
 use clap::{Parser, Subcommand};
 use thatch_runtime::RunOptions;
 
@@ -188,15 +188,33 @@ fn choose_host(
     }
     match find_host(DEFAULT_HOST, None) {
         Ok(host) => Ok(Some(host)),
-        Err(_) => {
+        Err(e) if e.is::<HostNotFound>() => {
             eprintln!(
                 "note: the {DEFAULT_HOST} host is not installed, so this game {what} without a window. Install it \
                  as docs/scratch-everywhere.md describes to get one, or pass --host {HEADLESS} to go without this note"
             );
             Ok(None)
         }
+        // A host that is there but cannot be used is not the same as none: it needs fixing, and
+        // falling back would hide that.
+        Err(e) => Err(e.context(format!(
+            "the {DEFAULT_HOST} host is installed but cannot be used; build it again, or pass --host {HEADLESS}"
+        ))),
     }
 }
+
+/// The error for a host whose build output is nowhere to be found, which `choose_host` tells
+/// apart from a host that was found but cannot be used.
+#[derive(Debug)]
+struct HostNotFound(String);
+
+impl std::fmt::Display for HostNotFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for HostNotFound {}
 
 /// Thatch's data directory, where hosts are installed: $THATCH_HOME, else the platform's place
 /// for an application's data.
@@ -251,16 +269,56 @@ fn run_on_host(
     if let Some(input) = input {
         game.arg("--input").arg(input);
     }
-    // Ctrl-C in a terminal reaches the game and thatch alike. The game decides what to do with
-    // it; thatch waits for it to end, so that the temporary directory is removed after all.
-    ctrlc::set_handler(|| {}).context("could not set up Ctrl-C handling")?;
-    let status = game.status().with_context(|| format!("could not start {}", exe.display()))?;
+    // thatch outlives the game, so that the temporary directory is removed after all.
+    let (interrupts, interrupted) = std::sync::mpsc::channel();
+    ctrlc::set_handler(move || {
+        let _ = interrupts.send(());
+    })
+    .context("could not set up Ctrl-C handling")?;
+    let mut game = game.spawn().with_context(|| format!("could not start {}", exe.display()))?;
+    let status = wait_for_game(&mut game, &interrupted)?;
     drop(dir);
     if !status.success() {
         // The game has said what went wrong; thatch ends as it did, as a shell would show it.
         std::process::exit(exit_code(status));
     }
     Ok(())
+}
+
+/// Waits for the game `thatch run` started, through the interrupts thatch gets meanwhile.
+///
+/// Ctrl-C in a terminal interrupts the game and thatch alike, so the game is ending already and
+/// thatch only waits. An interrupt sent to thatch alone has to end the game too, so when the game
+/// is still running a moment after an interrupt, thatch ends it. It does not interrupt the game a
+/// second time, which a game that is merely slow to quit would take as Ctrl-C pressed twice.
+fn wait_for_game(
+    game: &mut std::process::Child,
+    interrupted: &std::sync::mpsc::Receiver<()>,
+) -> anyhow::Result<std::process::ExitStatus> {
+    use std::sync::mpsc::RecvTimeoutError;
+    use std::time::{Duration, Instant};
+    const GRACE: Duration = Duration::from_secs(1);
+    let mut first: Option<Instant> = None;
+    let mut ended = false;
+    loop {
+        if let Some(status) = game.try_wait().context("could not wait for the game")? {
+            return Ok(status);
+        }
+        match interrupted.recv_timeout(Duration::from_millis(20)) {
+            Ok(()) => {
+                first.get_or_insert_with(Instant::now);
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            // The handler keeps the sender for good, so this does not happen; it would spin.
+            Err(RecvTimeoutError::Disconnected) => std::thread::sleep(Duration::from_millis(20)),
+        }
+        if !ended && first.is_some_and(|at| at.elapsed() >= GRACE) {
+            // The game has not been reaped (`try_wait` found it running), so this cannot end
+            // another process that took its id.
+            game.kill().context("could not end the game")?;
+            ended = true;
+        }
+    }
 }
 
 /// The status a process ended with, as a shell gives it: its exit code, or 128 plus the signal
@@ -368,12 +426,13 @@ fn find_host(name: &str, dir: Option<PathBuf>) -> anyhow::Result<Host> {
     }
     let Some(dir) = candidates.iter().find(|dir| dir.join(MANIFEST).is_file()) else {
         let looked: Vec<String> = candidates.iter().map(|d| d.display().to_string()).collect();
-        bail!(
+        return Err(HostNotFound(format!(
             "the host {name} was not found: no {MANIFEST} in {}. Build the host first (see the docs), \
              point --host-dir or THATCH_HOST_DIR at its build output, or build a game without a window \
              with --host {HEADLESS}",
             looked.join(" or ")
-        );
+        ))
+        .into());
     };
     let manifest = dir.join(MANIFEST);
     let text = std::fs::read_to_string(&manifest).with_context(|| format!("could not read {}", manifest.display()))?;
@@ -476,7 +535,8 @@ fn build(
         std::fs::create_dir(&dir).with_context(|| format!("could not create {}", dir.display()))?;
         Ok(dir)
     };
-    let (source_dir, link_dir, staging) = (dir("source")?, dir("link")?, dir("ship")?);
+    let (source_dir, link_dir) = (dir("source")?, dir("link")?);
+    let (staging, notices_dir, old) = (dir("ship")?, dir("notices")?, dir("old")?);
 
     // The project is read once, into the work directory, and that copy is both compiled and
     // shipped, so that a project saved again in the middle of the build cannot give the game the
@@ -489,7 +549,7 @@ fn build(
     let object = link_dir.join("program.o");
     std::fs::write(&object, bytes).with_context(|| format!("could not write {}", object.display()))?;
     if object_only {
-        return publish(&[(object, output)]);
+        return publish(&[(object, output)], &old);
     }
     let runtime = find_runtime_lib(runtime_lib)?;
     let mut notices = runtime_notices(&runtime)?;
@@ -521,15 +581,30 @@ fn build(
     if let Some(host) = &host {
         // The shared libraries the game loads from its own directory. Shipping them as separate
         // files is also what lets a player replace one, which the LGPL asks for. A rebuild
-        // replaces the copy an earlier build put there.
+        // replaces the copy an earlier build put there. Each goes under the name the executable
+        // asks the loader for, which can differ from the library's file name.
         for library in &host.libraries {
-            let name = library.file_name().context("a host library has no file name")?;
-            let staged = staging.join(name);
+            let name = load_name(library)?;
+            let staged = staging.join(&name);
             std::fs::copy(library, &staged).with_context(|| format!("could not copy {}", library.display()))?;
-            moves.push((staged, output.with_file_name(name)));
+            moves.push((staged, output.with_file_name(&name)));
         }
         if let Some(extension) = &host.project_extension {
-            moves.push((snapshot.clone(), beside(&output, &format!(".{extension}"))));
+            let to = beside(&output, &format!(".{extension}"));
+            if same_file(project, &to) {
+                // The project is where the game looks for it already, as when `thatch build
+                // game.sb3` builds `game` next to it: shipping the copy would replace the project
+                // with itself. It stays as it is, unless it changed while the game was built.
+                let now = std::fs::read(project).with_context(|| format!("could not read {}", project.display()))?;
+                if now != std::fs::read(&snapshot).context("could not read the copy of the project")? {
+                    bail!(
+                        "{} changed while the game was built, so the game's code is from the old version; build it again",
+                        project.display()
+                    );
+                }
+            } else {
+                moves.push((snapshot.clone(), to));
+            }
         }
         if let Some(path) = &host.notices {
             let text = std::fs::read_to_string(path).with_context(|| format!("could not read {}", path.display()))?;
@@ -538,11 +613,108 @@ fn build(
         }
     }
     // The notices: whoever ships the executable has to ship them too.
-    let notices_file = staging.join("licenses.txt");
+    // They have a directory of their own, so that no host library's name can be theirs.
+    let notices_file = notices_dir.join("licenses.txt");
     std::fs::write(&notices_file, notices).context("could not write the license notices")?;
     moves.push((notices_file, beside(&output, ".licenses.txt")));
     moves.push((exe, output));
-    publish(&moves)
+    publish(&moves, &old)
+}
+
+/// Whether two paths name the same existing file, however they are spelled.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        #[cfg(unix)]
+        (Ok(a), Ok(b)) => {
+            use std::os::unix::fs::MetadataExt;
+            (a.dev(), a.ino()) == (b.dev(), b.ino())
+        }
+        #[cfg(not(unix))]
+        (Ok(_), Ok(_)) => std::fs::canonicalize(a).ok() == std::fs::canonicalize(b).ok(),
+        _ => false,
+    }
+}
+
+/// The file name a game asks the loader for when it loads a host's shared library, which is the
+/// name it has to have next to the game. An ELF library linked by file name is recorded under
+/// its soname when it has one. A macOS library is recorded under its install name, which has to
+/// be relative to the rpath (or the executable) for the library to be found next to the game.
+/// Without either, it is the file name.
+fn load_name(library: &Path) -> anyhow::Result<std::ffi::OsString> {
+    let file_name = library.file_name().context("a host library has no file name")?.to_owned();
+    let data = std::fs::read(library).with_context(|| format!("could not read {}", library.display()))?;
+    let (recorded, is_macho) =
+        recorded_name(&data).map_err(|e| anyhow!("could not read {} as a shared library: {e}", library.display()))?;
+    let Some(recorded) = recorded else { return Ok(file_name) };
+    let recorded = String::from_utf8(recorded)
+        .map_err(|_| anyhow!("{} names itself with something other than text", library.display()))?;
+    let name = if is_macho {
+        ["@rpath/", "@executable_path/", "@loader_path/"].iter().find_map(|p| recorded.strip_prefix(p)).with_context(
+            || {
+                format!(
+                    "{} has the install name {recorded}, so a game would load it from there and not from its own \
+                     directory; the host has to build it with an install name of @rpath/{}",
+                    library.display(),
+                    file_name.to_string_lossy()
+                )
+            },
+        )?
+    } else {
+        recorded.as_str()
+    };
+    if name.is_empty() || name.contains('/') {
+        bail!("{} names itself {recorded}, which is not a file name next to the game", library.display());
+    }
+    Ok(name.into())
+}
+
+/// The name a shared library records for itself (an ELF soname, a Mach-O install name), and
+/// whether it is a Mach-O library.
+fn recorded_name(data: &[u8]) -> object::Result<(Option<Vec<u8>>, bool)> {
+    use object::FileKind;
+    use object::read::elf::{ElfFile32, ElfFile64};
+    use object::read::macho::{FatArch, MachOFatFile32, MachOFatFile64, MachOFile32, MachOFile64};
+    Ok(match FileKind::parse(data)? {
+        FileKind::Elf32 => (soname(&ElfFile32::parse(data)?, data)?, false),
+        FileKind::Elf64 => (soname(&ElfFile64::parse(data)?, data)?, false),
+        FileKind::MachO32 => (install_name(&MachOFile32::parse(data)?)?, true),
+        FileKind::MachO64 => (install_name(&MachOFile64::parse(data)?)?, true),
+        // A universal library names itself the same way in each of its parts.
+        FileKind::MachOFat32 => match MachOFatFile32::parse(data)?.arches().first() {
+            Some(part) => recorded_name(part.data(data)?)?,
+            None => (None, true),
+        },
+        FileKind::MachOFat64 => match MachOFatFile64::parse(data)?.arches().first() {
+            Some(part) => recorded_name(part.data(data)?)?,
+            None => (None, true),
+        },
+        _ => (None, false),
+    })
+}
+
+fn soname<'data, Elf: object::read::elf::FileHeader<Endian = object::Endianness>>(
+    file: &object::read::elf::ElfFile<'data, Elf>,
+    data: &'data [u8],
+) -> object::Result<Option<Vec<u8>>> {
+    let table = file.elf_section_table().dynamic_table(file.endian(), data)?;
+    for entry in &table {
+        if entry.tag == object::elf::DT_SONAME {
+            return Ok(Some(table.string(entry)?.to_vec()));
+        }
+    }
+    Ok(None)
+}
+
+fn install_name<Mach: object::read::macho::MachHeader<Endian = object::Endianness>>(
+    file: &object::read::macho::MachOFile<'_, Mach>,
+) -> object::Result<Option<Vec<u8>>> {
+    let mut commands = file.macho_load_commands()?;
+    while let Some(command) = commands.next()? {
+        if let object::read::macho::LoadCommandVariant::IdDylib(dylib) = command.variant()? {
+            return Ok(Some(command.string(file.endian(), dylib.dylib.name)?.to_vec()));
+        }
+    }
+    Ok(None)
 }
 
 /// Links a host's shared library. On Linux by file name from its directory (`-l:name`), so that a
@@ -560,21 +732,45 @@ fn link_shared(link: &mut Command, library: &Path) {
     }
 }
 
-/// Moves the files of a build into place, as `(from, to)` pairs in order. Two files may not go
-/// to the same place. When a move fails, the ones before it are undone and the files they
-/// replaced put back, so that a failed build leaves the old output as it was.
-fn publish(moves: &[(PathBuf, PathBuf)]) -> anyhow::Result<()> {
+/// Moves the files of a build into place, as `(from, to)` pairs in order, all into one
+/// directory. Two files may not go to the same place, and none where a directory is. When a move
+/// fails, the ones before it are undone and the files they replaced put back, so that a failed
+/// build leaves the old output as it was. `old` is a directory of the build's own next to the
+/// output, where the files being replaced are kept until then, under names nobody else uses.
+fn publish(moves: &[(PathBuf, PathBuf)], old: &Path) -> anyhow::Result<()> {
+    let Some((_, first)) = moves.first() else { return Ok(()) };
+    let parent = first.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    // Builds into the same directory move their files one build at a time, so that a game's
+    // executable, libraries, project and notices all come from the same build.
+    let _lock = lock_directory(parent)?;
     for (i, (_, to)) in moves.iter().enumerate() {
         if moves[..i].iter().any(|(_, earlier)| earlier == to) {
             bail!("two of the files of this build would be written to {}; choose another output name", to.display());
         }
+        if to.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+            bail!("{} is a directory, so the build cannot be written there; choose another output name", to.display());
+        }
     }
-    // Each file a move replaces is kept next to it first, so that it can be put back.
+    // Each file a move replaces is kept first, so that it can be put back.
     let mut done: Vec<(&Path, &Path, Option<PathBuf>)> = Vec::new();
     let mut failure = None;
-    for (from, to) in moves {
-        let kept = beside(to, ".thatch-old");
-        let had_old = to.exists() && std::fs::rename(to, &kept).is_ok();
+    for (i, (from, to)) in moves.iter().enumerate() {
+        let kept = old.join(i.to_string());
+        let had_old = match to.symlink_metadata() {
+            Ok(_) => match std::fs::rename(to, &kept) {
+                Ok(()) => true,
+                // Without the old file kept, it could not be put back, so nothing replaces it.
+                Err(e) => {
+                    failure = Some(anyhow::Error::new(e).context(format!("could not move {} aside", to.display())));
+                    break;
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => {
+                failure = Some(anyhow::Error::new(e).context(format!("could not look at {}", to.display())));
+                break;
+            }
+        };
         match std::fs::rename(from, to) {
             Ok(()) => done.push((from, to, had_old.then_some(kept))),
             Err(e) => {
@@ -587,14 +783,8 @@ fn publish(moves: &[(PathBuf, PathBuf)]) -> anyhow::Result<()> {
         }
     }
     match failure {
-        None => {
-            for (_, _, kept) in done {
-                if let Some(kept) = kept {
-                    let _ = std::fs::remove_file(kept);
-                }
-            }
-            Ok(())
-        }
+        // The replaced files go with the build's directory.
+        None => Ok(()),
         Some(error) => {
             for (from, to, kept) in done.into_iter().rev() {
                 let _ = std::fs::rename(to, from);
@@ -605,6 +795,17 @@ fn publish(moves: &[(PathBuf, PathBuf)]) -> anyhow::Result<()> {
             Err(error)
         }
     }
+}
+
+/// Locks a directory for one build's moves, until the returned file is dropped. Where a
+/// directory cannot be opened as a file (Windows), builds are not kept apart.
+fn lock_directory(dir: &Path) -> anyhow::Result<Option<std::fs::File>> {
+    if !cfg!(unix) {
+        return Ok(None);
+    }
+    let file = std::fs::File::open(dir).with_context(|| format!("could not open {}", dir.display()))?;
+    file.lock().with_context(|| format!("could not lock {} for this build", dir.display()))?;
+    Ok(Some(file))
 }
 
 /// The runtime library to link.

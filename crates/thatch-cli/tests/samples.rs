@@ -224,6 +224,22 @@ fn without_the_host_an_sb3_runs_headless_with_a_note() {
     let stderr = String::from_utf8_lossy(&asked.stderr);
     assert!(!asked.status.success() && stderr.contains("was not found"), "{stderr}");
 
+    // A host that is there but cannot be used is an error that says why, not a reason to go
+    // without a window.
+    let broken = dir.path().join("broken");
+    std::fs::create_dir(&broken).expect("the directory is created");
+    std::fs::write(broken.join("thatch-host.txt"), "adapter = libgone.a\n").expect("a broken description");
+    let output = thatch()
+        .arg("run")
+        .arg(&sb3)
+        .env("THATCH_HOST_DIR", &broken)
+        .env("THATCH_HOME", &nowhere)
+        .output()
+        .expect("thatch runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("cannot be used") && stderr.contains("libgone.a"), "{stderr}");
+    assert!(!stderr.contains("note:"), "{stderr}");
+
     // --timing measures the in-memory run, so without a host asked for, it runs headless quietly.
     let timed = run(&["--timing"]);
     let stderr = String::from_utf8_lossy(&timed.stderr);
@@ -259,6 +275,33 @@ fn run_ok(command: &mut Command, what: &str) {
     assert!(output.status.success(), "{what} failed: {}", String::from_utf8_lossy(&output.stderr));
 }
 
+/// Builds the C host of `samples_run_under_a_c_host` into `dir/libadapter.a`, the adapter of the
+/// made-up hosts in these tests.
+fn c_adapter(dir: &Path) {
+    let include = Path::new(env!("CARGO_MANIFEST_DIR")).join("../thatch-abi/include");
+    let host_c = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/c_host/host.c");
+    let object = dir.join("host.o");
+    run_ok(Command::new("cc").arg("-c").arg("-I").arg(&include).arg("-o").arg(&object).arg(&host_c), "cc");
+    run_ok(Command::new("ar").arg("rcs").arg(dir.join("libadapter.a")).arg(&object), "ar");
+}
+
+/// Builds `source` into a shared library in `dir` that is loaded under a versioned name: its
+/// file name and that name, which on Linux is its soname and on macOS its install name.
+fn shared_library(dir: &Path, source: &Path, name: &str) -> (String, String) {
+    let (file, loaded, option) = if cfg!(target_os = "macos") {
+        let loaded = format!("lib{name}.1.dylib");
+        (format!("lib{name}.dylib"), loaded.clone(), format!("-Wl,-install_name,@rpath/{loaded}"))
+    } else {
+        let loaded = format!("lib{name}.so.1");
+        (format!("lib{name}.so"), loaded.clone(), format!("-Wl,-soname,{loaded}"))
+    };
+    run_ok(
+        Command::new("cc").arg("-shared").arg("-fPIC").arg(option).arg("-o").arg(dir.join(&file)).arg(source),
+        "cc -shared",
+    );
+    (file, loaded)
+}
+
 /// `thatch build --host` knows a host only through the `thatch-host.txt` in its build output:
 /// which adapter to link, which shared libraries and license texts go next to the game, and
 /// whether the project file does too. This host is made up on the spot: its adapter is the C host
@@ -266,25 +309,15 @@ fn run_ok(command: &mut Command, what: &str) {
 #[test]
 fn a_build_for_a_host_follows_the_hosts_description() {
     let runtime_lib = runtime_lib();
-    let include = Path::new(env!("CARGO_MANIFEST_DIR")).join("../thatch-abi/include");
-    let host_c = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/c_host/host.c");
     let host_dir = temp_out_dir("host");
     let dir = host_dir.path();
 
-    let object = dir.join("host.o");
-    run_ok(Command::new("cc").arg("-c").arg("-I").arg(&include).arg("-o").arg(&object).arg(&host_c), "cc");
-    run_ok(Command::new("ar").arg("rcs").arg(dir.join("libadapter.a")).arg(&object), "ar");
+    c_adapter(dir);
     let extra_c = dir.join("extra.c");
     std::fs::write(&extra_c, "int thatch_test_extra(void) { return 7; }\n").expect("the source is written");
-    let (library, name_option) = if cfg!(target_os = "macos") {
-        ("libextra.dylib", "-Wl,-install_name,@rpath/libextra.dylib")
-    } else {
-        ("libextra.so", "-Wl,-soname,libextra.so")
-    };
-    run_ok(
-        Command::new("cc").arg("-shared").arg("-fPIC").arg(name_option).arg("-o").arg(dir.join(library)).arg(&extra_c),
-        "cc -shared",
-    );
+    // The library is loaded under a versioned name, as many are, so the game only starts if
+    // thatch puts it next to the game under that name and not under its file name.
+    let (library, shipped) = shared_library(dir, &extra_c, "extra");
     std::fs::write(dir.join("notices.txt"), "The notices of the made-up host.\n").expect("the notices are written");
     let manifest = format!(
         "# a made-up host\nadapter = libadapter.a\nlibrary = {library}\nnotices = notices.txt\nlinker = cc\nproject = json\n"
@@ -332,7 +365,8 @@ fn a_build_for_a_host_follows_the_hosts_description() {
     check_output("hello", "thatch run on a made-up host", &run);
     // Next to it: the shared library, the project file under the game's name, and the notices of
     // the runtime with the host's after them.
-    assert!(out_dir.path().join(library).is_file(), "the shared library is next to the game");
+    assert!(out_dir.path().join(&shipped).is_file(), "the shared library is next to the game as {shipped}");
+    assert!(!out_dir.path().join(&library).exists(), "and not under its file name");
     let copied = std::fs::read(out_dir.path().join("game.json")).expect("the project file is next to the game");
     assert_eq!(copied, std::fs::read(&project).expect("the project"));
     let notices = std::fs::read_to_string(out_dir.path().join("game.licenses.txt")).expect("the notices");
@@ -371,7 +405,7 @@ fn a_build_for_a_host_follows_the_hosts_description() {
     // Two files of one build cannot go to the same place: here the executable is given the name
     // of the host's library. The build fails before it replaces anything.
     std::fs::write(dir.join("thatch-host.txt"), &manifest).expect("rewritten");
-    let clash = out_dir.path().join(library);
+    let clash = out_dir.path().join(&shipped);
     let before = std::fs::read(&clash).expect("the library from the first build");
     let output = thatch()
         .arg("build")
@@ -388,6 +422,90 @@ fn a_build_for_a_host_follows_the_hosts_description() {
     assert!(!output.status.success() && stderr.contains("two of the files"), "{stderr}");
     assert_eq!(std::fs::read(&clash).expect("still there"), before, "nothing was replaced");
 
+    let build_into = |project: &Path, out: &Path| {
+        thatch()
+            .arg("build")
+            .arg(project)
+            .args(["--host", "made-up", "--host-dir"])
+            .arg(dir)
+            .arg("--runtime-lib")
+            .arg(&runtime_lib)
+            .arg("-o")
+            .arg(out)
+            .output()
+            .expect("thatch builds")
+    };
+    // Nothing is written where a directory is, and the directory is left where it was.
+    let occupied = out_dir.path().join("occupied");
+    std::fs::create_dir(&occupied).expect("the directory is created");
+    let output = build_into(&project, &occupied);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("is a directory"), "{stderr}");
+    assert!(occupied.is_dir(), "the directory is still there");
+    // The files a build replaces are kept in its own directory, which goes with it.
+    let leftovers: Vec<_> = std::fs::read_dir(out_dir.path())
+        .expect("the output directory")
+        .map(|e| e.expect("an entry").file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(".thatch") || name.ends_with(".thatch-old"))
+        .collect();
+    assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
+
+    // A project that is where the game looks for it already, as when `thatch build game.sb3`
+    // builds `game` next to it, stays as it is.
+    let own_dir = temp_out_dir("host-own-project");
+    let own = own_dir.path().join("game.json");
+    std::fs::copy(&project, &own).expect("the project is copied");
+    let output = build_into(&own, &own_dir.path().join("game"));
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(std::fs::read(&own).expect("the project"), std::fs::read(&project).expect("the sample"));
+    let ran = Command::new(own_dir.path().join("game")).arg("--frames").arg("3000").output().expect("the game runs");
+    check_output("hello", "made-up host, project in place", &ran);
+
+    // A host library may have any name the notices might have had in the build's own directory.
+    let named_c = dir.join("named.c");
+    std::fs::write(&named_c, "int thatch_test_named(void) { return 8; }\n").expect("the source is written");
+    let name_option =
+        if cfg!(target_os = "macos") { "-Wl,-install_name,@rpath/licenses.txt" } else { "-Wl,-soname,licenses.txt" };
+    run_ok(
+        Command::new("cc")
+            .arg("-shared")
+            .arg("-fPIC")
+            .arg(name_option)
+            .arg("-o")
+            .arg(dir.join("licenses.txt"))
+            .arg(&named_c),
+        "cc -shared",
+    );
+    std::fs::write(dir.join("thatch-host.txt"), format!("{manifest}library = licenses.txt\n")).expect("rewritten");
+    let named_dir = temp_out_dir("host-named");
+    let output = build_into(&project, &named_dir.path().join("game"));
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        std::fs::read(named_dir.path().join("licenses.txt")).expect("the library"),
+        std::fs::read(dir.join("licenses.txt")).expect("the host's"),
+        "the library is shipped as it is"
+    );
+    let notices = std::fs::read_to_string(named_dir.path().join("game.licenses.txt")).expect("the notices");
+    assert!(notices.ends_with("The notices of the made-up host.\n"), "{notices}");
+
+    // A macOS library whose install name is a fixed path would be loaded from there, not from
+    // next to the game, so the host has to be built differently.
+    if cfg!(target_os = "macos") {
+        run_ok(
+            Command::new("cc")
+                .args(["-shared", "-fPIC", "-Wl,-install_name,/usr/local/lib/libfixed.dylib", "-o"])
+                .arg(dir.join("libfixed.dylib"))
+                .arg(&named_c),
+            "cc -shared",
+        );
+        std::fs::write(dir.join("thatch-host.txt"), format!("{manifest}library = libfixed.dylib\n"))
+            .expect("rewritten");
+        let output = build_into(&project, &named_dir.path().join("fixed"));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && stderr.contains("@rpath/libfixed.dylib"), "{stderr}");
+    }
+    std::fs::write(dir.join("thatch-host.txt"), &manifest).expect("rewritten");
+
     // `thatch run` on a host ends as the game did: the C host refuses arguments it does not know.
     let run = thatch()
         .arg("run")
@@ -400,6 +518,68 @@ fn a_build_for_a_host_follows_the_hosts_description() {
         .output()
         .expect("thatch runs");
     assert_eq!(run.status.code(), Some(2), "{}", String::from_utf8_lossy(&run.stderr));
+}
+
+/// `thatch run` on a host waits for the game, so that it can remove the temporary directory it
+/// built the game in. Ctrl-C in a terminal interrupts both, and the game ends as it would on its
+/// own. An interrupt sent to thatch alone ends the game too.
+#[cfg(unix)]
+#[test]
+fn thatch_run_ends_the_game_it_was_interrupted_for() {
+    use std::os::unix::process::CommandExt;
+    use std::time::{Duration, Instant};
+    let host_dir = temp_out_dir("interrupt-host");
+    c_adapter(host_dir.path());
+    std::fs::write(host_dir.path().join("thatch-host.txt"), "adapter = libadapter.a\n").expect("the description");
+    // A script that never ends, so the game runs until it is ended.
+    let project = host_dir.path().join("forever.json");
+    std::fs::write(
+        &project,
+        r#"{"targets":[{"isStage":true,"name":"Stage","variables":{},"lists":{},"broadcasts":{},"blocks":{
+            "flag":{"opcode":"event_whenflagclicked","next":"loop","parent":null,"inputs":{},"fields":{},"shadow":false,"topLevel":true,"x":0,"y":0},
+            "loop":{"opcode":"control_forever","next":null,"parent":"flag","inputs":{},"fields":{},"shadow":false,"topLevel":false}},
+            "currentCostume":0,"costumes":[],"sounds":[],"volume":100,"layerOrder":0}],
+            "monitors":[],"extensions":[],"meta":{"semver":"3.0.0"}}"#,
+    )
+    .expect("the project is written");
+
+    for (signal_group, expected) in [(false, 128 + 9), (true, 128 + 2)] {
+        let temp = temp_out_dir("interrupt-temp");
+        let mut command = thatch();
+        command
+            .arg("run")
+            .arg(&project)
+            .args(["--host", "made-up", "--host-dir"])
+            .arg(host_dir.path())
+            .arg("--runtime-lib")
+            .arg(runtime_lib())
+            .env("TMPDIR", temp.path())
+            // A process group of its own, which the interrupt goes to as Ctrl-C sends it to the
+            // terminal's foreground group.
+            .process_group(0);
+        let mut thatch = command.spawn().expect("thatch runs");
+        // Until the game has been built and started.
+        let started = Instant::now();
+        while std::fs::read_dir(temp.path()).expect("the temporary directory").next().is_none() {
+            assert!(started.elapsed() < Duration::from_secs(60), "the game did not start");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::thread::sleep(Duration::from_millis(500));
+        let target = if signal_group { format!("-{}", thatch.id()) } else { thatch.id().to_string() };
+        run_ok(Command::new("kill").args(["-INT", "--", &target]), "kill");
+        let interrupted = Instant::now();
+        let status = loop {
+            if let Some(status) = thatch.try_wait().expect("thatch is waited for") {
+                break status;
+            }
+            assert!(interrupted.elapsed() < Duration::from_secs(20), "the game did not end");
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        // From the group, the game ends of the interrupt itself; to thatch alone, thatch ends it.
+        assert_eq!(status.code(), Some(expected), "interrupting the group: {signal_group}");
+        let left: Vec<_> = std::fs::read_dir(temp.path()).expect("the temporary directory").collect();
+        assert!(left.is_empty(), "the game's temporary directory is left: {left:?}");
+    }
 }
 
 #[test]

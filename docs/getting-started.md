@@ -63,7 +63,7 @@ thatch build --host headless project.sb3 -o project
 ./project --frames 300
 ```
 
-It needs only `thatch` and `libthatch_runtime.a`, and writes just the executable and its `project.licenses.txt`. Like `thatch run`, `thatch build` builds headless with a note when the host is not installed, and a bare `project.json`, which has no costumes, is always built headless.
+It needs only `thatch` and `libthatch_runtime.a`, and writes just the executable and its `project.licenses.txt`. Like `thatch run`, `thatch build` builds headless with a note when the host is not installed (one that is installed but broken is an error), and a bare `project.json`, which has no costumes, is always built headless.
 
 `thatch` looks for `libthatch_runtime.a` next to itself, which is where `cargo build` puts both, and then in Thatch's data directory, where installing the host puts a copy. `--runtime-lib` or `THATCH_RUNTIME_LIB` point it elsewhere. `cargo install` installs only the `thatch` executable, so an installed `thatch` can build executables once the host is installed. The executable takes the same `--frames`, `--timing`, `--seed` and `--input` options as `thatch run --host headless`.
 
