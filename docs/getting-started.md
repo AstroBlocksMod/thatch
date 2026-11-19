@@ -65,7 +65,7 @@ thatch build --host headless project.sb3 -o project
 ./project --frames 300
 ```
 
-It needs only `thatch` and `libthatch_runtime.a`, and writes just the executable and its `project.licenses.txt`. Like `thatch run`, `thatch build` builds headless with a note when the host is not installed (one that is installed but broken is an error), and a bare `project.json`, which has no costumes, is always built headless. That includes a `project.json` in a file named `.sb3`, since it is the content that tells the two apart; asking for the host for one is an error.
+It needs only `thatch` and `libthatch_runtime.a`, and writes just the executable and its `project.licenses.txt`. Like `thatch run`, `thatch build` builds headless with a note when the host is not installed (one that is installed but broken is an error), and a bare `project.json`, which has no costumes, is always built headless. It is the content that tells the two apart, not the file name: a `project.json` in a file named `.sb3` is built headless (asking for the host for one is an error), and an `.sb3` archive gets the host whatever it is called.
 
 `thatch` looks for `libthatch_runtime.a` next to itself, which is where `cargo build` puts both, and then in Thatch's data directory, where installing the host puts a copy. `--runtime-lib` or `THATCH_RUNTIME_LIB` point it elsewhere. `cargo install` installs only the `thatch` executable, so an installed `thatch` can build executables once the host is installed. A headless executable takes the same `--frames`, `--timing`, `--seed` and `--input` options as `thatch run --host headless`. One with a window takes the options of its host, which [the Scratch Everywhere! page](scratch-everywhere.md#building-a-game) lists.
 

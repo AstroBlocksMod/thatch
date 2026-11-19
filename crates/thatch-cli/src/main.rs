@@ -20,7 +20,8 @@ enum Cmd {
     /// directory, which is removed when the game ends, and started from there. With --host
     /// headless it is compiled in memory instead and prints what sprites say.
     Run {
-        /// An .sb3 file or a project.json, which has no costumes and so always runs headless.
+        /// An .sb3 archive or a bare project.json, which has no costumes and so always runs
+        /// headless. The content tells them apart, whatever the file is called.
         project: PathBuf,
         /// The host to run on, as for `thatch build`.
         #[arg(long)]
@@ -70,12 +71,14 @@ enum Cmd {
         #[arg(long)]
         runtime_lib: Option<PathBuf>,
         /// The host the game runs on. `scratch-everywhere` opens a window and draws the stage; it
-        /// needs the project as an .sb3, links the host's adapter, and puts the host's shared
-        /// library, the project file and the host's license texts next to the executable. Games
-        /// built into one directory share that library, and each build replaces it, so build them
-        /// all with the same host build. `headless` builds a game without a window that prints what sprites say. Without this
-        /// option an .sb3 gets a window when the scratch-everywhere host is installed, and is
-        /// built headless with a note when it is not; a project.json is always headless.
+        /// needs the project as an .sb3 archive, links the host's adapter, and puts the host's
+        /// shared library, the project file and the host's license texts next to the executable.
+        /// Games built into one directory share that library, and each build replaces it, so
+        /// build them all with the same host build. `headless` builds a game without a window that
+        /// prints what sprites say. Without this option an .sb3 archive gets a window when the
+        /// scratch-everywhere host is installed, and is built headless with a note when it is not;
+        /// a bare project.json is always headless. The content tells the two apart, whatever the
+        /// file is called.
         #[arg(long, conflicts_with = "object")]
         host: Option<String>,
         /// Where the host's build output is: the directory with its thatch-host.txt. Defaults to
@@ -169,9 +172,10 @@ fn lower(project: &Path) -> anyhow::Result<thatch_scratch::Lowered> {
     Ok(lowered)
 }
 
-/// The host a game runs on. A host that was asked for has to be there. Without one, an .sb3 gets
-/// the default host with a window if it is installed; otherwise, and for a project.json (also one
-/// in a file named .sb3), which has no costumes to draw, the game is headless, as `thatch` needs nothing else for that. The
+/// The host a game runs on. A host that was asked for has to be there. Without one, an .sb3
+/// archive (by content, whatever its name) gets the default host with a window if it is
+/// installed; otherwise, and for a bare project.json, which has no costumes to draw, the game is
+/// headless, as `thatch` needs nothing else for that. The
 /// fallback says so, since the player gets no window: `what` is "runs" or "is built".
 fn choose_host(
     name: Option<String>,
@@ -186,11 +190,10 @@ fn choose_host(
     if host_dir.is_some() {
         return resolve_host(DEFAULT_HOST, host_dir);
     }
-    // A bare project.json is headless whatever it is called, since it is the content that tells
-    // the formats apart. A project that cannot be read is too, and reading it reports why.
-    if project.extension().is_none_or(|e| !e.eq_ignore_ascii_case("sb3"))
-        || thatch_sb3::is_bare_json(project).unwrap_or(true)
-    {
+    // It is the content that tells the formats apart, not the name: a bare project.json is
+    // headless whatever it is called, and an archive gets the window whatever it is called. A
+    // project that cannot be read is headless too, and reading it reports why.
+    if thatch_sb3::is_bare_json(project).unwrap_or(true) {
         return Ok(None);
     }
     match find_host(DEFAULT_HOST, None) {
@@ -538,17 +541,6 @@ fn build(
     runtime_lib: Option<PathBuf>,
     host: Option<Host>,
 ) -> anyhow::Result<()> {
-    if let Some(host) = &host
-        && let Some(extension) = &host.project_extension
-        && project.extension().is_none_or(|e| !e.eq_ignore_ascii_case(extension.as_str()))
-    {
-        bail!(
-            "the {} host reads the project's costumes when the game runs, so it needs the project as an .{extension} file, \
-             not {}; build it with --host {HEADLESS} for a game without a window",
-            host.name,
-            project.display()
-        );
-    }
     let stem = project.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "program".to_owned());
     let output = output.unwrap_or_else(|| PathBuf::from(if object_only { format!("{stem}.o") } else { stem.clone() }));
     // Everything is written into a fresh private directory next to the output and moved into
@@ -576,7 +568,8 @@ fn build(
     let snapshot = source_dir.join(project.file_name().unwrap_or(std::ffi::OsStr::new("project")));
     std::fs::copy(project, &snapshot).with_context(|| format!("could not read {}", project.display()))?;
     // A host that reads the project file has to get the format it reads, which is told by the
-    // content, not by the name: a project.json in a file named .sb3 is no archive.
+    // content, not by the name: a project.json in a file named .sb3 is no archive, and an
+    // archive named .json is one. The copy next to the game gets the name the host reads.
     if let Some(host) = &host
         && let Some(extension) = &host.project_extension
     {
@@ -647,7 +640,7 @@ fn build(
 
     // What ships with the executable goes next to it, the executable last.
     let mut moves = Vec::new();
-    let mut in_place = false;
+    let mut in_place: Option<PathBuf> = None;
     if let Some(host) = &host {
         // The shared libraries the game loads from its own directory. Shipping them as separate
         // files is also what lets a player replace one, which the LGPL asks for. A rebuild
@@ -664,10 +657,11 @@ fn build(
             let to = beside(&output, &format!(".{extension}"));
             // The project is where the game looks for it already, as when `thatch build game.sb3`
             // builds `game` next to it: shipping the copy would replace the project with itself.
-            // It stays as it is, and `publish` checks that it did not change while the game was
-            // built.
-            in_place = same_file(project, &to);
-            if !in_place {
+            // It stays as it is, and `publish` checks that the file the game will open did not
+            // change while the game was built.
+            if same_file(project, &to) {
+                in_place = Some(to);
+            } else {
                 moves.push((snapshot.clone(), to));
             }
         }
@@ -685,15 +679,15 @@ fn build(
     moves.push((exe, output));
     // A project left in place has to be the version the game was built from once everything is
     // in place, or the build is undone: an editor saving it meanwhile does not wait for thatch.
+    // What is read is the file next to the game, which the game opens, under the name it opens
+    // it by, not the project path the build was given: the two need not stay one file.
     let unchanged = || -> anyhow::Result<()> {
-        if !in_place {
-            return Ok(());
-        }
-        let now = std::fs::read(project).with_context(|| format!("could not read {}", project.display()))?;
+        let Some(beside_game) = &in_place else { return Ok(()) };
+        let now = std::fs::read(beside_game).with_context(|| format!("could not read {}", beside_game.display()))?;
         if now != std::fs::read(&snapshot).context("could not read the copy of the project")? {
             bail!(
                 "{} changed while the game was built, so the game's code would be from the old version; build it again",
-                project.display()
+                beside_game.display()
             );
         }
         Ok(())
@@ -887,6 +881,19 @@ fn publish(
                 break;
             }
         };
+        // What was moved aside is looked at once it is out of the way, since a directory may have
+        // appeared there after the check before the moves. A directory is never replaced (it would
+        // go with the work directory), so it is put back and the build stops.
+        if had_old && kept.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+            if std::fs::rename(&kept, to).is_err() {
+                lost.push(format!("the directory {} is at {}", to.display(), kept.display()));
+            }
+            failure = Some(anyhow!(
+                "{} is a directory, so the build cannot be written there; choose another output name",
+                to.display()
+            ));
+            break;
+        }
         match std::fs::rename(from, to) {
             Ok(()) => done.push((from, to, had_old.then_some(kept))),
             Err(e) => {

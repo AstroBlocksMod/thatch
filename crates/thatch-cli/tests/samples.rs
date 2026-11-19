@@ -253,6 +253,20 @@ fn without_the_host_an_sb3_runs_headless_with_a_note() {
         .expect("thatch runs");
     assert!(output.status.success() && output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
     assert_eq!(String::from_utf8_lossy(&output.stdout), expected("hello"));
+    // And an archive gets the host whatever it is called: named .json, it is looked for, and here
+    // not found, which the note says.
+    let archive = dir.path().join("archive.json");
+    std::fs::copy(&sb3, &archive).expect("the archive is copied");
+    let output = thatch()
+        .arg("run")
+        .arg(&archive)
+        .env("THATCH_HOST_DIR", &nowhere)
+        .env("THATCH_HOME", &nowhere)
+        .output()
+        .expect("thatch runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success() && stderr.contains("note:"), "{stderr}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected("hello"));
 
     // A host directory that cannot be looked into may hold the host that was meant, so it is an
     // error, not a reason to go without a window. (Not for root, who can look anyway.)
@@ -416,7 +430,7 @@ fn a_build_for_a_host_follows_the_hosts_description() {
         .expect("rewritten");
     let refused = build(&project, dir);
     let stderr = String::from_utf8_lossy(&refused.stderr);
-    assert!(!refused.status.success() && stderr.contains(".sb3 file"), "{stderr}");
+    assert!(!refused.status.success() && stderr.contains("bare project.json"), "{stderr}");
     // The format is told by the content: a project.json named .sb3 is no archive either.
     let raw = out_dir.path().join("raw.sb3");
     std::fs::copy(&project, &raw).expect("the project is copied");
@@ -451,7 +465,9 @@ fn a_build_for_a_host_follows_the_hosts_description() {
     // of the host's library. The build fails before it replaces anything.
     std::fs::write(dir.join("thatch-host.txt"), &manifest).expect("rewritten");
     let clash = out_dir.path().join(&shipped);
-    let before = std::fs::read(&clash).expect("the library from the first build");
+    // Bytes the build would not write, so that only a build that puts them back keeps them.
+    let before = b"not the library a build would write".to_vec();
+    std::fs::write(&clash, &before).expect("the library is replaced");
     let output = thatch()
         .arg("build")
         .arg(&project)
