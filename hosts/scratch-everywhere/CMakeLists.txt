@@ -99,6 +99,17 @@ set(ENV{CATALOG_NON_INTERACTIVE} 1)
 
 add_subdirectory("${SE_PATCHED}" scratch-everywhere-build EXCLUDE_FROM_ALL)
 
+# A Debug build of the library turns on AddressSanitizer by itself (SE_ASAN in its pc.cmake). An
+# instrumented library only loads into an executable that links the sanitizer's runtime, which a
+# game does not, so the library is built without it in every configuration.
+foreach(property COMPILE_OPTIONS LINK_LIBRARIES)
+    get_target_property(values scratch-everywhere ${property})
+    if(values)
+        list(REMOVE_ITEM values -fsanitize=address -fno-omit-frame-pointer)
+        set_target_properties(scratch-everywhere PROPERTIES ${property} "${values}")
+    endif()
+endforeach()
+
 set(HOST_LIB_DIR "${CMAKE_CURRENT_BINARY_DIR}/lib")
 set_target_properties(scratch-everywhere PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${HOST_LIB_DIR}"
