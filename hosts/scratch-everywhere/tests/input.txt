@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# What the player does in the test, in the format of `thatch run --input`. By frame 10 the green
+# flag script has left the Cat at (-120, -40), turning in place.
+
+# The space key moves the Cat 20 steps to the right.
+10 key down space
+12 key up space
+
+# A press in the middle of the Cat, which the host has to find under the pointer, released over
+# the empty stage. The Cat is not draggable, so it is clicked as the button goes down; a host that
+# clicked on the release would start the stage's hat here instead.
+20 mouse -100 -40
+21 mouse down
+25 mouse 200 120
+26 mouse up
+
+# A click on the empty stage.
+30 mouse 200 120
+31 mouse down
+33 mouse up
+
+# A key that goes down and up before the same frame still counts as a press.
+40 key down space
+40 key up space
+
+# A click that names its target goes to it wherever the pointer is, as in the headless host:
+# the pointer is still over the empty stage, but the Cat is clicked.
+46 mouse down Cat
+48 mouse up Cat

@@ -16,7 +16,7 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -27,3 +27,30 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo build --workspace
       - run: cargo test --workspace
+
+  hosts:
+    name: Hosts
+    runs-on: ubuntu-latest
+    env:
+      # Scratch Everywhere! fetches its dependencies with Catalog, which must not stop to ask
+      # whether it may install packages.
+      CATALOG_NON_INTERACTIVE: 1
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: recursive
+      # Nothing outside hosts/ may depend on anything inside it.
+      - run: tools/check-hosts.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build libsdl2-dev
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/catalog
+          key: catalog-${{ runner.os }}-${{ hashFiles('.gitmodules', 'hosts/scratch-everywhere/CMakeLists.txt', 'hosts/scratch-everywhere/patches/**') }}
+      # The host's test links a game against the runtime, so the workspace is built first.
+      - run: cargo build --workspace
+      - run: cmake -S hosts/scratch-everywhere -B hosts/scratch-everywhere/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build hosts/scratch-everywhere/build
+      - run: ctest --test-dir hosts/scratch-everywhere/build --output-on-failure

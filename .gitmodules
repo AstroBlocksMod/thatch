@@ -1,0 +1,3 @@
+[submodule "hosts/scratch-everywhere/ScratchEverywhere"]
+	path = hosts/scratch-everywhere/ScratchEverywhere
+	url = https://github.com/ScratchEverywhere/ScratchEverywhere.git

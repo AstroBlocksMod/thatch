@@ -1,0 +1,159 @@
+SPDX-License-Identifier: LGPL-3.0-or-later
+
+A patch to Scratch Everywhere! (https://github.com/ScratchEverywhere/ScratchEverywhere), which is
+licensed under the GNU Lesser General Public License, version 3. This patch modifies that
+library, so it is under that license too, in version 3 or any later version; see ../LICENSE.
+
+It lets a program that embeds the library run the project's scripts itself:
+
+- HostHooks (include/runtime/host_hooks.hpp) holds a callback a host can set. Once it is set,
+  BlockExecutor::startThread and BytecodeExecutor::startThread start no thread: the hat block
+  goes to the host instead.
+- On desktop platforms DECtalk was always built in. It still is by default, but a build can now
+  turn it off with -DSE_DECTALK=OFF.
+
+It applies to the commit the ScratchEverywhere submodule is pinned to. The build applies it to a
+copy of the submodule; the submodule itself stays as upstream published it.
+
+diff --git a/cmake/platforms/pc.cmake b/cmake/platforms/pc.cmake
+index 1fbf8f39..60b121e1 100644
+--- a/cmake/platforms/pc.cmake
++++ b/cmake/platforms/pc.cmake
+@@ -27,7 +27,10 @@ set(SE_BUNDLE_DEFAULT ON)
+ set(SE_ALLOW_BUNDLE ON)
+ set(SE_ALLOW_CLOUDVARS ON)
+ set(SE_ALLOW_DOWNLOAD ON)
+-set(SE_DECTALK ON)
++# On unless the build says otherwise: a program that embeds the library may not want DECtalk.
++if(NOT DEFINED SE_DECTALK)
++	set(SE_DECTALK ON)
++endif()
+ 
+ set(SE_PLATFORM_DEFINITIONS "__PC__")
+ set(SE_PLATFORM "pc")
+diff --git a/include/runtime/host_hooks.hpp b/include/runtime/host_hooks.hpp
+new file mode 100644
+index 00000000..33eab08c
+--- /dev/null
++++ b/include/runtime/host_hooks.hpp
+@@ -0,0 +1,41 @@
++// SPDX-License-Identifier: LGPL-3.0-or-later
++#pragma once
++#include <se_export.hpp>
++
++class Sprite;
++struct Block;
++
++/**
++ * Lets a program that embeds the library run the project's scripts itself.
++ *
++ * Without a hook the library behaves as it always has. Once a host sets one, no script thread is
++ * started by the library any more: every hat block that would have started one (a key press, a
++ * click, a broadcast, the green flag) is handed to the host instead, which decides what to run.
++ * The library keeps doing everything else: loading the project, drawing, sound and input.
++ */
++namespace HostHooks {
++/**
++ * Called in place of starting a thread.
++ * @param data the pointer given to `setStartHat`
++ * @param sprite the sprite the hat belongs to
++ * @param hat the hat block
++ * @param shouldRestart whether a thread of this hat that is still running would have been restarted
++ */
++using StartHatFn = void (*)(void *data, Sprite *sprite, Block *hat, bool shouldRestart);
++
++/**
++ * Sets the hook, or removes it with `nullptr`.
++ */
++SE_EXPORT void setStartHat(StartHatFn fn, void *data);
++
++/**
++ * @return `true` if a host has set a hook, so hats go to it.
++ */
++SE_EXPORT bool hasStartHat();
++
++/**
++ * Hands a hat to the host.
++ * @return `false` if no host has set a hook, in which case nothing happened.
++ */
++SE_EXPORT bool startHat(Sprite *sprite, Block *hat, bool shouldRestart);
++} // namespace HostHooks
+diff --git a/source/runtime/bytecode_executor.cpp b/source/runtime/bytecode_executor.cpp
+index d2003697..accc509f 100644
+--- a/source/runtime/bytecode_executor.cpp
++++ b/source/runtime/bytecode_executor.cpp
+@@ -1,5 +1,6 @@
+ #include "bytecode_executor.hpp"
+ #include "blockExecutor.hpp"
++#include "host_hooks.hpp"
+ #include "math.hpp"
+ #include "renderer.hpp"
+ #include "runtime.hpp"
+@@ -1659,6 +1660,10 @@ void BytecodeExecutor::buildCloneLinkTable(Sprite *clone, Sprite *original) {
+ }
+ 
+ BytecodeThread *BytecodeExecutor::startThread(Sprite *sprite, Block *hat, bool shouldRestart) {
++    // A host that runs the scripts itself takes every hat. Returning no thread sends the caller
++    // on to BlockExecutor::startThread, as it does for a hat the bytecode cannot run, and that is
++    // where the hat is handed over.
++    if (HostHooks::hasStartHat()) return nullptr;
+     const BytecodeChunk *chunk = sprite->bytecodeChunk();
+     const BytecodeLinkTable *link = sprite->bytecodeLink.get();
+     if (chunk == nullptr || link == nullptr) return nullptr;
+diff --git a/source/runtime/executor/BlockExecutorThreads.cpp b/source/runtime/executor/BlockExecutorThreads.cpp
+index c241b005..11805a79 100644
+--- a/source/runtime/executor/BlockExecutorThreads.cpp
++++ b/source/runtime/executor/BlockExecutorThreads.cpp
+@@ -2,11 +2,32 @@
+ #include "bytecode_executor.hpp"
+ #include <algorithm>
+ #include <cstddef>
++#include <host_hooks.hpp>
+ #include <renderer.hpp>
+ #include <runtime.hpp>
+ #include <speech_manager.hpp>
+ #include <vector>
+ 
++namespace {
++HostHooks::StartHatFn hostStartHat = nullptr;
++void *hostStartHatData = nullptr;
++} // namespace
++
++void HostHooks::setStartHat(StartHatFn fn, void *data) {
++    hostStartHat = fn;
++    hostStartHatData = data;
++}
++
++bool HostHooks::hasStartHat() {
++    return hostStartHat != nullptr;
++}
++
++bool HostHooks::startHat(Sprite *sprite, Block *hat, bool shouldRestart) {
++    if (hostStartHat == nullptr) return false;
++    hostStartHat(hostStartHatData, sprite, hat, shouldRestart);
++    return true;
++}
++
+ uint64_t BlockExecutor::nextThreadId() {
+     static uint64_t id = 0;
+     return ++id;
+@@ -31,7 +52,9 @@ uint64_t BlockExecutor::startHat(Sprite *sprite, Block *hat) {
+     if (BytecodeThread *t = BytecodeExecutor::startThread(sprite, hat, true)) {
+         return t->id;
+     }
+-    return BlockExecutor::startThread(sprite, hat)->id;
++    // A host that runs the scripts itself was handed the hat, and there is no thread to name.
++    ScriptThread *t = BlockExecutor::startThread(sprite, hat);
++    return t != nullptr ? t->id : 0;
+ }
+ 
+ std::vector<uint64_t> BlockExecutor::startBroadcastHats(std::string broadcast) {
+@@ -51,6 +74,8 @@ std::vector<uint64_t> BlockExecutor::startBroadcastHats(std::string broadcast) {
+ }
+ 
+ ScriptThread *BlockExecutor::startThread(Sprite *sprite, Block *block, bool shouldRestart) {
++    // A host that runs the scripts itself gets the hat instead of a thread here.
++    if (HostHooks::startHat(sprite, block, shouldRestart)) return nullptr;
+     if (sprite->name == "Benchmark") fprintf(stderr, "[STARTTHREAD] sprite=Benchmark block=%p shouldRestart=%d\n", (void *)block, shouldRestart);
+     size_t restartThreadIndex = -1;
+     for (size_t i = 0; i < threads.size(); i++) {
