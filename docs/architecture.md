@@ -39,7 +39,7 @@ flowchart LR
 : Lowers the IR to Cranelift IR and from there to machine code, either into memory (for `thatch run`) or into an object file with a C `main` (for `thatch build`). Numbers are `f64` registers, booleans `i8`, strings handles, and dynamically typed values pointers to 16-byte slots.
 
 `thatch-runtime`
-: Everything a running program needs that is not its own code: the targets, their variables and their sprite state (position, direction, size, costume, visibility, effects, layer order), strings, the thread scheduler and the headless host. Built as both an rlib (for `thatch run`, which links it into the compiler) and a staticlib (`libthatch_runtime.a`, for executables).
+: Everything a running program needs that is not its own code: the targets, their variables and their sprite state (position, direction, size, costume, visibility, effects, layer order), strings, the thread scheduler and the headless host. Built as both an rlib (for `thatch run`, which links it into the compiler) and a staticlib (`libthatch_runtime.a`, for executables). Its build script also gathers the license notices of everything the library contains, which `thatch build` writes next to each executable (see [getting started](getting-started.md#licenses-of-a-built-executable)).
 
 `thatch-cli`
 : The `thatch` command.

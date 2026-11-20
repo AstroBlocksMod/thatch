@@ -859,6 +859,7 @@ name = "thatch-runtime"
 version = "0.1.0"
 dependencies = [
  "corosensei",
+ "serde_json",
  "thatch-abi",
  "thatch-values",
 ]

@@ -25,6 +25,18 @@ mod strings;
 mod thread;
 mod value;
 
+/// The license notices a program built with this runtime has to ship: the texts the licenses of
+/// Rust's standard library and of the crates the runtime links ask for, gathered by the build
+/// script for the platform this crate was built for. The same text is written next to
+/// `libthatch_runtime.a` as `libthatch_runtime.licenses.txt`, which is what `thatch build` copies;
+/// this copy is for when that file is not there.
+pub const LICENSE_NOTICES: &str = include_str!(concat!(env!("OUT_DIR"), "/licenses.txt"));
+
+/// Whether [`LICENSE_NOTICES`] lacks the notices of Rust's standard library because the toolchain
+/// the runtime was built with did not come with them, as one installed without rustup may not.
+/// The notices then start by saying so.
+pub const LICENSE_NOTICES_LACK_RUST: bool = option_env!("THATCH_NOTICES_LACK_RUST").is_some();
+
 pub use api::{host_symbols, symbols};
 pub use host::{Input, InputEvent, RunOptions, RunReport, parse_input_script, run};
 pub use scheduler::{Runtime, Stage};
