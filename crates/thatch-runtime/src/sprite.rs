@@ -15,15 +15,13 @@
 
 use std::rc::Rc;
 
-use thatch_abi::{
-    EFFECT_COUNT, MEASURE_BOUNDS, MEASURE_BOX, MEASURE_COSTUME_SIZE, STAGE_HEIGHT, STAGE_WIDTH, Sprite, Value,
-};
+use thatch_abi::{EFFECT_COUNT, MEASURE_BOUNDS, MEASURE_BOX, MEASURE_COSTUME_SIZE, Sprite, Value};
 use thatch_values::{
     ValueRef, clamp, deg_to_rad, is_whitespace, js_max, js_min, js_number, rad_to_deg, round, wrap_clamp,
     wrap_direction,
 };
 
-use crate::scheduler::{Rt, Runtime};
+use crate::scheduler::{Rt, Runtime, Stage};
 
 /// How close to the edge a sprite may be dragged or moved: `FENCE_WIDTH` in scratch-render.
 const FENCE_WIDTH: f64 = 15.0;
@@ -77,8 +75,9 @@ impl Runtime {
         match name {
             "_mouse_" => Some((self.mouse_x, self.mouse_y)),
             "_random_" => {
-                let x = round(STAGE_WIDTH * (self.random() - 0.5));
-                let y = round(STAGE_HEIGHT * (self.random() - 0.5));
+                let (half_w, half_h) = (self.stage.width / 2.0, self.stage.height / 2.0);
+                let x = Stage::round_into(self.stage.width * (self.random() - 0.5), half_w);
+                let y = Stage::round_into(self.stage.height * (self.random() - 0.5), half_h);
                 Some((x, y))
             }
             _ => {
@@ -245,7 +244,7 @@ impl Rt {
     pub fn set_xy(self, target: usize, x: f64, y: f64) {
         let Some((px, py)) = self.position(target) else { return };
         let (x, y) = match self.bounds(target, MEASURE_BOX) {
-            Some(aabb) => fenced(px, py, aabb, x, y),
+            Some(aabb) => fenced(self.with(|r| r.stage), px, py, aabb, x, y),
             None => (x, y),
         };
         let visible = self.with(|r| {
@@ -316,11 +315,13 @@ impl Rt {
     /// `if on edge, bounce`. Needs the sprite's drawn bounds, so it does nothing headless.
     pub fn bounce(self, target: usize) {
         let Some(bounds) = self.bounds(target, MEASURE_BOUNDS) else { return };
+        let stage = self.with(|r| r.stage);
+        let (half_w, half_h) = (stage.width / 2.0, stage.height / 2.0);
         // Distances to the edges: positive away from an edge, zero at or beyond it.
-        let dist_left = js_max(0.0, STAGE_WIDTH / 2.0 + bounds.left);
-        let dist_top = js_max(0.0, STAGE_HEIGHT / 2.0 - bounds.top);
-        let dist_right = js_max(0.0, STAGE_WIDTH / 2.0 - bounds.right);
-        let dist_bottom = js_max(0.0, STAGE_HEIGHT / 2.0 + bounds.bottom);
+        let dist_left = js_max(0.0, half_w + bounds.left);
+        let dist_top = js_max(0.0, half_h - bounds.top);
+        let dist_right = js_max(0.0, half_w - bounds.right);
+        let dist_bottom = js_max(0.0, half_h + bounds.bottom);
         let mut nearest = Edge::None;
         let mut min = f64::INFINITY;
         for (dist, edge) in
@@ -348,7 +349,6 @@ impl Rt {
         self.set_direction(target, direction);
         // `keepInFence` at the current position: push the (now rotated) bounds back onto the stage.
         let Some(b) = self.bounds(target, MEASURE_BOUNDS) else { return };
-        let (half_w, half_h) = (STAGE_WIDTH / 2.0, STAGE_HEIGHT / 2.0);
         let mut dx = 0.0;
         let mut dy = 0.0;
         if b.left < -half_w {
@@ -410,8 +410,9 @@ impl Rt {
         let size = match self.measure(target, MEASURE_COSTUME_SIZE) {
             Some(costume) => {
                 let (w, h) = (costume[0], costume[1]);
+                let stage = self.with(|r| r.stage);
                 let min_scale = js_min(1.0, js_max(5.0 / w, 5.0 / h));
-                let max_scale = js_min(1.5 * STAGE_WIDTH / w, 1.5 * STAGE_HEIGHT / h);
+                let max_scale = js_min(1.5 * stage.width / w, 1.5 * stage.height / h);
                 clamp(size / 100.0, min_scale, max_scale) * 100.0
             }
             None => size,
@@ -539,19 +540,19 @@ enum Edge {
 /// scratch-render's `getFencedPositionOfDrawable`: a sprite at `(px, py)` with bounding box `aabb`
 /// wants to move to `(x, y)`; the result keeps at least 15 pixels of it (or half of it, when it is
 /// smaller) on the stage.
-fn fenced(px: f64, py: f64, aabb: Bounds, mut x: f64, mut y: f64) -> (f64, f64) {
+fn fenced(stage: Stage, px: f64, py: f64, aabb: Bounds, mut x: f64, mut y: f64) -> (f64, f64) {
     let dx = x - px;
     let dy = y - py;
     let width = aabb.right - aabb.left;
     let height = aabb.top - aabb.bottom;
     let inset = (js_min(width, height) / 2.0).floor();
-    let sx = STAGE_WIDTH / 2.0 - js_min(FENCE_WIDTH, inset);
+    let sx = stage.width / 2.0 - js_min(FENCE_WIDTH, inset);
     if aabb.right + dx < -sx {
         x = (px - (sx + aabb.right)).ceil();
     } else if aabb.left + dx > sx {
         x = (px + (sx - aabb.left)).floor();
     }
-    let sy = STAGE_HEIGHT / 2.0 - js_min(FENCE_WIDTH, inset);
+    let sy = stage.height / 2.0 - js_min(FENCE_WIDTH, inset);
     if aabb.top + dy < -sy {
         y = (py - (sy + aabb.top)).ceil();
     } else if aabb.bottom + dy > sy {
@@ -577,14 +578,39 @@ mod tests {
     fn fencing_keeps_part_of_the_sprite_on_stage() {
         // A 100 by 100 sprite centered at the origin.
         let aabb = Bounds { left: -50.0, right: 50.0, bottom: -50.0, top: 50.0 };
-        assert_eq!(fenced(0.0, 0.0, aabb, 100.0, 0.0), (100.0, 0.0));
+        let stage = Stage::SCRATCH;
+        assert_eq!(fenced(stage, 0.0, 0.0, aabb, 100.0, 0.0), (100.0, 0.0));
         // Far right: at most 15 pixels may stay on the stage, so the left edge stops at 225.
-        assert_eq!(fenced(0.0, 0.0, aabb, 1000.0, 0.0), (275.0, 0.0));
-        assert_eq!(fenced(0.0, 0.0, aabb, -1000.0, 0.0), (-275.0, 0.0));
-        assert_eq!(fenced(0.0, 0.0, aabb, 0.0, 1000.0), (0.0, 215.0));
+        assert_eq!(fenced(stage, 0.0, 0.0, aabb, 1000.0, 0.0), (275.0, 0.0));
+        assert_eq!(fenced(stage, 0.0, 0.0, aabb, -1000.0, 0.0), (-275.0, 0.0));
+        assert_eq!(fenced(stage, 0.0, 0.0, aabb, 0.0, 1000.0), (0.0, 215.0));
         // A tiny sprite keeps half of itself on the stage instead.
         let dot = Bounds { left: -2.0, right: 2.0, bottom: -2.0, top: 2.0 };
-        assert_eq!(fenced(0.0, 0.0, dot, 1000.0, 0.0), (240.0, 0.0));
+        assert_eq!(fenced(stage, 0.0, 0.0, dot, 1000.0, 0.0), (240.0, 0.0));
+        // The fence stands at the edge of the stage the runtime has, not of Scratch's.
+        let wide = Stage { width: 640.0, height: 200.0, frame_rate: 30.0 };
+        assert_eq!(fenced(wide, 0.0, 0.0, aabb, 1000.0, 0.0), (355.0, 0.0));
+        assert_eq!(fenced(wide, 0.0, 0.0, aabb, 0.0, -1000.0), (0.0, -135.0));
+    }
+
+    #[test]
+    fn random_positions_cover_the_stage_the_runtime_has() {
+        let host = thatch_abi::Host {
+            data: std::ptr::null_mut(),
+            say: None,
+            now_ms: None,
+            sprite_changed: None,
+            measure: None,
+        };
+        let rt = Runtime::create(host, 7);
+        // SAFETY: a runtime of this test only, with no threads and no callbacks.
+        unsafe {
+            assert!((*rt).set_stage(Stage { width: 2000.0, height: 20.0, frame_rate: 30.0 }));
+            let points: Vec<(f64, f64)> = (0..200).filter_map(|_| (*rt).target_xy("_random_")).collect();
+            assert!(points.iter().all(|(x, y)| x.abs() <= 1000.0 && y.abs() <= 10.0), "{points:?}");
+            assert!(points.iter().any(|(x, _)| x.abs() > 240.0), "wider than Scratch's stage: {points:?}");
+            Runtime::destroy(rt);
+        }
     }
 
     #[test]

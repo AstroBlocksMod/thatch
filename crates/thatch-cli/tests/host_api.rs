@@ -70,6 +70,10 @@ fn run_frame(host: &Host, abi_version: u32, init: InitFn) -> (Sprite, Vec<i64>, 
     unsafe {
         let rt = api::thatch_runtime_create(thatch_abi::ABI_VERSION as i32, host, 1);
         assert_eq!(api::thatch_runtime_load(rt, abi_version as i32, init), thatch_abi::LOAD_OK);
+        // A host sizes its window and paces its frames from what the runtime reports. A Scratch
+        // project gets Scratch's stage, which the fencing and clamping below are measured against.
+        assert_eq!((api::thatch_runtime_stage_width(rt), api::thatch_runtime_stage_height(rt)), (480.0, 360.0));
+        assert_eq!(api::thatch_runtime_frame_rate(rt), 30.0);
         // The first frame draws what was loaded; the green flag comes after it.
         assert_eq!(api::thatch_runtime_frame(rt), 0);
         assert_eq!(api::thatch_runtime_redraw_requested(rt), 1, "a loaded program is drawn once");

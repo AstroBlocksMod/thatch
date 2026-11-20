@@ -27,5 +27,5 @@ mod value;
 
 pub use api::{host_symbols, symbols};
 pub use host::{Input, InputEvent, RunOptions, RunReport, parse_input_script, run};
-pub use scheduler::Runtime;
+pub use scheduler::{Runtime, Stage};
 pub use thatch_abi::InitFn;

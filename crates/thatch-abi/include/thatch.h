@@ -12,7 +12,7 @@ extern "C" {
 /* The ABI version this header describes. A program reports the version it was compiled for through
  * thatch_program_abi_version, and thatch_runtime_load refuses any other. A host passes it to
  * thatch_runtime_create, which refuses any other too. */
-#define THATCH_ABI_VERSION 5
+#define THATCH_ABI_VERSION 6
 
 /* The runtime. Opaque; create one with thatch_runtime_create. */
 typedef struct ThatchRuntime ThatchRuntime;
@@ -35,10 +35,6 @@ int32_t thatch_program_abi_version(void);
 #define THATCH_LOAD_WRONG_ABI_VERSION 1
 #define THATCH_LOAD_NO_STAGE 2
 #define THATCH_LOAD_ALREADY_LOADED 3
-
-/* The stage, in Scratch coordinates: x runs from -240 to 240, y from -180 to 180. */
-#define THATCH_STAGE_WIDTH 480
-#define THATCH_STAGE_HEIGHT 360
 
 /* Rotation styles. */
 #define THATCH_ROTATE_ALL_AROUND 0
@@ -90,8 +86,9 @@ typedef void (*ThatchSpriteChangedFn)(void *data, ThatchRuntime *rt, int64_t tar
 typedef int8_t (*ThatchMeasureFn)(void *data, ThatchRuntime *rt, int64_t target, int32_t what, double *out);
 
 /* What a host gives the runtime: data is passed back to every callback. A null callback means the
- * host does not care, except now_ms, where null selects the virtual clock of one frame per thirtieth
- * of a second that makes headless runs repeatable. Zero the struct before filling it in, so fields
+ * host does not care, except now_ms, where null selects the virtual clock that makes headless runs
+ * repeatable: it moves by one frame (a thirtieth of a second at Scratch's frame rate, see
+ * thatch_runtime_frame_rate) each time a frame runs. Zero the struct before filling it in, so fields
  * added later are null. A callback may ask the runtime about its state (thatch_runtime_target_name
  * and the like), but must not run a frame, load, start or stop anything, or destroy the runtime.
  *
@@ -108,9 +105,10 @@ typedef struct ThatchHost {
     ThatchMeasureFn measure;
 } ThatchHost;
 
-/* A host creates a runtime, loads a program, starts the green flag and then runs a frame at a time,
- * drawing after each one that requested a redraw. Nothing here is thread-safe; one runtime belongs to
- * one thread. */
+/* A host creates a runtime, loads a program, asks how big the stage is and how fast it runs
+ * (thatch_runtime_stage_width, thatch_runtime_stage_height, thatch_runtime_frame_rate), starts the
+ * green flag and then runs a frame at a time, drawing after each one that requested a redraw. Nothing
+ * here is thread-safe; one runtime belongs to one thread. */
 
 /* Creates a runtime that reports to `host` (copied, or null for no callbacks) and seeds `pick
  * random` with `seed`. `abi_version` is the THATCH_ABI_VERSION the host was compiled with,
@@ -139,9 +137,10 @@ void thatch_runtime_start_hats(ThatchRuntime *rt, int64_t hat, const char *arg, 
  * hats for the key and for "any". */
 void thatch_runtime_key(ThatchRuntime *rt, const char *key, size_t len, int8_t down);
 
-/* The mouse moved to a point in Scratch coordinates (x from -240 to 240, y from -180 to 180,
- * origin in the middle, y up); the runtime rounds and clamps it as scratch-vm does. A NaN
- * coordinate is ignored. */
+/* The mouse moved to a point in Scratch coordinates: the origin is the middle of the stage and
+ * y points up, so x runs from minus half of thatch_runtime_stage_width to half of it, and y
+ * the same way with the height. The runtime rounds the point and clamps it to the stage as
+ * scratch-vm does. A NaN coordinate is ignored. */
 void thatch_runtime_mouse_move(ThatchRuntime *rt, double x, double y);
 
 /* The mouse button went down or up over `target`, the frontmost target under the pointer as
@@ -153,6 +152,22 @@ void thatch_runtime_mouse_button(ThatchRuntime *rt, int8_t down, int64_t target,
 
 /* Whether the player may drag a target, which decides when its clicks count. */
 int8_t thatch_runtime_target_draggable(const ThatchRuntime *rt, int64_t target);
+
+/* The width of the stage in Scratch units: 480 for a Scratch project. The stage is centered on
+ * the origin, so x runs from minus half of this to half of it. The runtime clamps the mouse,
+ * picks random positions, fences sprites and limits their size with this value and with
+ * thatch_runtime_stage_height, so a host lays out what it draws from the two instead of
+ * assuming 480 by 360. Both are fixed once a program is loaded. */
+double thatch_runtime_stage_width(const ThatchRuntime *rt);
+
+/* The height of the stage in Scratch units: 360 for a Scratch project. y runs from minus half
+ * of this to half of it. */
+double thatch_runtime_stage_height(const ThatchRuntime *rt);
+
+/* How many frames a second the host should run: 30 for a Scratch project. The virtual clock
+ * moves by one such frame for every thatch_runtime_frame, and a frame may work for 75 percent
+ * of one before it ends. Fixed once a program is loaded. */
+double thatch_runtime_frame_rate(const ThatchRuntime *rt);
 
 /* Runs one frame: steps the threads until they all wait for the next frame, a redraw was
  * requested or 75 percent of a frame has passed. Returns 0, or nonzero after an error that

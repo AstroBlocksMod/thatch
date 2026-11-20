@@ -5,10 +5,10 @@
 //! hats scratch-vm would start. Which target is under the mouse is the host's business, since only
 //! it knows what it drew.
 
-use thatch_abi::{HAT_KEY, HAT_SPRITE_CLICKED, HAT_STAGE_CLICKED, STAGE_HEIGHT, STAGE_WIDTH};
-use thatch_values::{ValueRef, clamp, round, to_string};
+use thatch_abi::{HAT_KEY, HAT_SPRITE_CLICKED, HAT_STAGE_CLICKED};
+use thatch_values::{ValueRef, to_string};
 
-use crate::scheduler::Runtime;
+use crate::scheduler::{Runtime, Stage};
 
 /// The keys Scratch names rather than spells.
 const KEY_NAMES: [&str; 6] = ["space", "left arrow", "up arrow", "right arrow", "down arrow", "enter"];
@@ -84,14 +84,15 @@ impl Runtime {
     }
 
     /// The mouse moved to a point in Scratch coordinates, which scratch-vm rounds and clamps to the
-    /// stage. A NaN coordinate is ignored and the old one kept, as scratch-vm's mouse skips a
-    /// coordinate that is not truthy, so the mouse position is never NaN.
+    /// stage, whose size is the runtime's. A NaN coordinate is ignored and the old one kept, as
+    /// scratch-vm's mouse skips a coordinate that is not truthy, so the mouse position is never NaN.
     pub fn mouse_move(&mut self, x: f64, y: f64) {
+        let (half_w, half_h) = (self.stage.width / 2.0, self.stage.height / 2.0);
         if !x.is_nan() {
-            self.mouse_x = round(clamp(x, -STAGE_WIDTH / 2.0, STAGE_WIDTH / 2.0));
+            self.mouse_x = Stage::round_into(x, half_w);
         }
         if !y.is_nan() {
-            self.mouse_y = round(clamp(y, -STAGE_HEIGHT / 2.0, STAGE_HEIGHT / 2.0));
+            self.mouse_y = Stage::round_into(y, half_h);
         }
     }
 
@@ -127,6 +128,7 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scheduler::Stage;
 
     #[test]
     fn key_names_follow_scratch() {
@@ -158,6 +160,38 @@ mod tests {
             assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (10.0, -20.0));
             (*rt).mouse_move(5.0, f64::NAN);
             assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (5.0, -20.0));
+            Runtime::destroy(rt);
+        }
+    }
+
+    #[test]
+    fn the_mouse_is_clamped_to_the_stage_the_runtime_has() {
+        let host = thatch_abi::Host {
+            data: std::ptr::null_mut(),
+            say: None,
+            now_ms: None,
+            sprite_changed: None,
+            measure: None,
+        };
+        let rt = Runtime::create(host, 1);
+        // SAFETY: a runtime of this test only, with no threads and no callbacks.
+        unsafe {
+            assert!((*rt).set_stage(Stage { width: 640.0, height: 200.0, frame_rate: 60.0 }));
+            (*rt).mouse_move(1000.0, 1000.0);
+            assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (320.0, 100.0));
+            (*rt).mouse_move(-300.0, -150.0);
+            assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (-300.0, -100.0));
+            // A smaller stage moves a mouse that was off it back onto it.
+            assert!((*rt).set_stage(Stage { width: 100.0, height: 50.0, frame_rate: 60.0 }));
+            assert_eq!(((*rt).mouse_x, (*rt).mouse_y), (-50.0, -25.0));
+            // At the edge of a stage of a fractional size, rounding does not leave the stage:
+            // -40.7 would round to -41, which is past the edge.
+            assert!((*rt).set_stage(Stage { width: 81.4, height: 50.0, frame_rate: 60.0 }));
+            (*rt).mouse_move(-1000.0, 0.0);
+            assert_eq!((*rt).mouse_x, -40.7);
+            // A wider stage leaves a mouse that still fits where it is, unrounded.
+            assert!((*rt).set_stage(Stage { width: 100.0, height: 50.0, frame_rate: 60.0 }));
+            assert_eq!((*rt).mouse_x, -40.7);
             Runtime::destroy(rt);
         }
     }

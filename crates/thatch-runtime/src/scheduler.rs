@@ -5,8 +5,13 @@
 //! during the pass. Passes repeat while some stepped thread is still active (a thread waiting on a
 //! timer or on other threads is stepped but does not count), no redraw was requested and less than
 //! 75 percent of the frame time has gone by. The clock that `wait` and `timer` read comes from the
-//! host; without one it is virtual, one thirtieth of a second per frame, so headless runs are
-//! repeatable. Only the frame budget is always real time.
+//! host; without one it is virtual, one frame's time per frame (a thirtieth of a second at
+//! Scratch's frame rate), so headless runs are repeatable. Only the frame budget is always real
+//! time.
+//!
+//! The size of the stage and the frame rate are values of the runtime ([`Stage`]), not constants:
+//! the runtime uses them for everything that depends on them and reports them to the host, so the
+//! two cannot disagree about where the edge of the stage is or how long a frame lasts.
 //!
 //! The runtime talks back to its host through the [`Host`] table it was created with: every bubble
 //! goes to `say`, the clock to `now_ms`, and every change to how a sprite looks to
@@ -38,8 +43,41 @@ use crate::strings::{self, Handle};
 use crate::thread::{ScriptFn, Status, Thread, Yield};
 use crate::value::VarSlot;
 
-pub const FPS: f64 = 30.0;
-const WORK_TIME: Duration = Duration::from_micros(25_000);
+/// The size of the stage and how fast it runs. The stage is centered on the origin, so x runs from
+/// `-width / 2` to `width / 2` and y from `-height / 2` to `height / 2`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Stage {
+    pub width: f64,
+    pub height: f64,
+    /// Frames per second.
+    pub frame_rate: f64,
+}
+
+impl Stage {
+    /// Scratch's stage: 480 by 360 at 30 frames per second.
+    pub const SCRATCH: Self = Self { width: 480.0, height: 360.0, frame_rate: 30.0 };
+
+    /// How long a frame may step threads before it ends: 75 percent of a frame, scratch-vm's
+    /// `WORK_TIME`.
+    fn work_time(self) -> Duration {
+        // `Runtime::set_stage` only accepts rates for which this is a nonzero duration.
+        Duration::try_from_secs_f64(0.75 / self.frame_rate).unwrap_or(Duration::from_millis(25))
+    }
+
+    /// Whether the stage can be: a positive, finite size, and a frame rate whose work time is a
+    /// duration greater than zero, so that a frame neither panics nor ends after one pass.
+    fn is_valid(self) -> bool {
+        let positive = [self.width, self.height, self.frame_rate].iter().all(|v| v.is_finite() && *v > 0.0);
+        positive && Duration::try_from_secs_f64(0.75 / self.frame_rate).is_ok_and(|d| !d.is_zero())
+    }
+
+    /// `value` rounded as scratch-vm rounds a coordinate and kept within `-half..=half`. The clamp
+    /// comes after the rounding too, so that a stage of a fractional size cannot round a point
+    /// past its edge; for Scratch's whole-numbered stage the result is scratch-vm's.
+    pub(crate) fn round_into(value: f64, half: f64) -> f64 {
+        thatch_values::clamp(thatch_values::round(thatch_values::clamp(value, -half, half)), -half, half)
+    }
+}
 
 pub struct Script {
     pub hat: i64,
@@ -77,6 +115,9 @@ pub struct Runtime {
     this: *mut Runtime,
     /// The host's callbacks. `data` is the host's; the runtime only passes it back.
     pub(crate) host: Host,
+    /// The size of the stage and the frame rate, which the host reads back through
+    /// `thatch_runtime_stage_width` and its neighbors. Change it with [`Runtime::set_stage`].
+    pub(crate) stage: Stage,
     pub targets: Vec<Box<Target>>,
     /// Target indices in scratch-vm's executable order, which starts as the drawing order, the
     /// stage first and the frontmost sprite last. Hats start in the reverse of this order, so the
@@ -128,6 +169,7 @@ impl Runtime {
         let rt = Box::into_raw(Box::new(Self {
             this: ptr::null_mut(),
             host,
+            stage: Stage::SCRATCH,
             targets: Vec::new(),
             order: Vec::new(),
             draw_order: Vec::new(),
@@ -165,6 +207,29 @@ impl Runtime {
     pub unsafe fn destroy(rt: *mut Runtime) {
         // SAFETY: forwarded from the caller.
         drop(unsafe { Box::from_raw(rt) });
+    }
+
+    /// The size of the stage and the frame rate.
+    pub fn stage(&self) -> Stage {
+        self.stage
+    }
+
+    /// Gives the stage another size or frame rate than Scratch's. Only before a program is loaded,
+    /// since hosts read the values once after loading and the virtual clock counts in frames; a
+    /// later call changes nothing and returns false, and so does a size that is not a positive
+    /// finite number or a frame rate too high or too low to time a frame with. The mouse is moved
+    /// onto the new stage if it was off it.
+    pub fn set_stage(&mut self, stage: Stage) -> bool {
+        if self.loaded || !stage.is_valid() {
+            return false;
+        }
+        self.stage = stage;
+        // Only clamped: the mouse was rounded when it was reported, and has not moved since, so a
+        // point that is still on the stage stays exactly where it was.
+        let (half_w, half_h) = (stage.width / 2.0, stage.height / 2.0);
+        self.mouse_x = thatch_values::clamp(self.mouse_x, -half_w, half_w);
+        self.mouse_y = thatch_values::clamp(self.mouse_y, -half_h, half_h);
+        true
     }
 
     // ---- registration -------------------------------------------------------------------------
@@ -500,7 +565,7 @@ impl Runtime {
                 if stopped || r.threads.iter().any(|t| t.status == Status::Done) {
                     r.threads.retain(|t| t.status != Status::Done);
                 }
-                active == 0 || r.redraw_requested || r.frame_started.elapsed() >= WORK_TIME
+                active == 0 || r.redraw_requested || r.frame_started.elapsed() >= r.stage.work_time()
             };
             // SAFETY: forwarded from the caller.
             unsafe { Self::finish_dying(rt) };
@@ -663,12 +728,13 @@ impl Rt {
     /// Milliseconds on the host's clock, or on the virtual clock when the host has none. The clock
     /// is a host callback, so it is read with no reference to the runtime alive.
     pub fn now_ms(self) -> f64 {
-        let (now, data, frame) = self.with(|r| (r.host.now_ms, r.host.data, r.frame));
+        let (now, data, frame, frame_rate) = self.with(|r| (r.host.now_ms, r.host.data, r.frame, r.stage.frame_rate));
         match now {
             // SAFETY: the host gave this callback and its data for the runtime to call, and no
             // reference to the runtime is alive, so the callback may call back in.
             Some(now) => unsafe { now(data) },
-            None => frame as f64 * 1000.0 / FPS,
+            // Multiplied before dividing, so that whole seconds come out exact.
+            None => frame as f64 * 1000.0 / frame_rate,
         }
     }
 

@@ -123,6 +123,9 @@ pub fn host_symbols() -> Vec<(&'static str, *const u8)> {
         thatch_runtime_mouse_move,
         thatch_runtime_mouse_button,
         thatch_runtime_target_draggable,
+        thatch_runtime_stage_width,
+        thatch_runtime_stage_height,
+        thatch_runtime_frame_rate,
         thatch_runtime_frame,
         thatch_runtime_redraw_requested,
         thatch_runtime_has_threads,
@@ -241,6 +244,24 @@ pub unsafe extern "C" fn thatch_runtime_target_draggable(rt: *const OpaqueRuntim
         let t = usize::try_from(target).ok().and_then(|i| r.targets.get(i));
         i8::from(t.is_some_and(|t| t.draggable))
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_stage_width(rt: *const OpaqueRuntime) -> f64 {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe { (*rt.cast::<Runtime>()).stage.width }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_stage_height(rt: *const OpaqueRuntime) -> f64 {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe { (*rt.cast::<Runtime>()).stage.height }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn thatch_runtime_frame_rate(rt: *const OpaqueRuntime) -> f64 {
+    // SAFETY: as `thatch_runtime_green_flag`.
+    unsafe { (*rt.cast::<Runtime>()).stage.frame_rate }
 }
 
 #[unsafe(no_mangle)]
@@ -1336,6 +1357,49 @@ mod tests {
             assert_eq!(thatch_runtime_redraw_requested(rt), 1, "nothing is drawn yet after a load");
             assert_eq!(thatch_runtime_load(rt, version, init_stage), thatch_abi::LOAD_ALREADY_LOADED);
             assert_eq!(thatch_runtime_target_count(rt), 1);
+            thatch_runtime_destroy(rt);
+        }
+    }
+
+    #[test]
+    fn the_host_reads_the_stage_the_runtime_uses() {
+        use crate::scheduler::{Rt, Stage};
+
+        let version = thatch_abi::ABI_VERSION as i32;
+        // SAFETY: a runtime without callbacks, used and destroyed here.
+        unsafe {
+            let rt = thatch_runtime_create(version, std::ptr::null(), 1);
+            assert_eq!(
+                (thatch_runtime_stage_width(rt), thatch_runtime_stage_height(rt), thatch_runtime_frame_rate(rt)),
+                (480.0, 360.0, 30.0),
+                "Scratch's stage unless told otherwise"
+            );
+            let r = rt.cast::<Runtime>();
+            // A stage or a frame rate that cannot be is refused and changes nothing.
+            assert!(!(*r).set_stage(Stage { width: 0.0, height: 360.0, frame_rate: 30.0 }));
+            assert!(!(*r).set_stage(Stage { width: 480.0, height: 360.0, frame_rate: f64::NAN }));
+            // A frame rate whose work time no duration can hold, and one whose work time rounds
+            // to nothing, so that every frame would end after its first pass.
+            assert!(!(*r).set_stage(Stage { width: 480.0, height: 360.0, frame_rate: 1e-30 }));
+            assert!(!(*r).set_stage(Stage { width: 480.0, height: 360.0, frame_rate: 1e30 }));
+            assert_eq!(
+                (thatch_runtime_stage_width(rt), thatch_runtime_stage_height(rt), thatch_runtime_frame_rate(rt)),
+                (480.0, 360.0, 30.0),
+                "a refused stage leaves the one before it"
+            );
+            assert!((*r).set_stage(Stage { width: 640.0, height: 400.0, frame_rate: 50.0 }));
+            assert_eq!(
+                (thatch_runtime_stage_width(rt), thatch_runtime_stage_height(rt), thatch_runtime_frame_rate(rt)),
+                (640.0, 400.0, 50.0)
+            );
+            assert_eq!(thatch_runtime_load(rt, version, init_stage), thatch_abi::LOAD_OK);
+            // The virtual clock moves by one frame of that rate per frame.
+            assert_eq!(Rt::new(r).now_ms(), 0.0);
+            assert_eq!(thatch_runtime_frame(rt), 0);
+            assert_eq!(Rt::new(r).now_ms(), 20.0);
+            // Hosts read the stage once after loading, so it is fixed from then on.
+            assert!(!(*r).set_stage(Stage::SCRATCH));
+            assert_eq!(thatch_runtime_frame_rate(rt), 50.0);
             thatch_runtime_destroy(rt);
         }
     }
