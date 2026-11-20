@@ -32,6 +32,12 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
+
 #include <audio.hpp>
 #include <collision.hpp>
 #include <host_hooks.hpp>
@@ -424,17 +430,61 @@ bool parseNumber(const char *text, uint64_t &out) {
     return errno == 0 && *end == '\0';
 }
 
-/// The first word of `line` from `pos` on, which is moved past it and the spaces after it.
-std::string nextWord(const std::string &line, size_t &pos) {
-    const char *const spaces = " \t\r";
-    const size_t start = line.find_first_not_of(spaces, pos);
-    if (start == std::string::npos) {
-        pos = line.size();
-        return "";
+/// The length in bytes of the whitespace character at `i` in the UTF-8 text `s`, or 0 when
+/// there is none there. Whitespace is what Rust's `char::is_whitespace` takes for it, which is
+/// what the headless host splits an input script on, so that a script reads the same on both.
+size_t whitespaceAt(const std::string &s, size_t i) {
+    const auto byte = [&](size_t k) -> uint32_t { return k < s.size() ? static_cast<unsigned char>(s[k]) : 0; };
+    const uint32_t b = byte(i);
+    if (b == ' ' || (b >= 0x09 && b <= 0x0D)) return 1;
+    uint32_t c = 0;
+    size_t len = 0;
+    if ((b & 0xE0) == 0xC0 && (byte(i + 1) & 0xC0) == 0x80) {
+        c = ((b & 0x1F) << 6) | (byte(i + 1) & 0x3F);
+        len = 2;
+    } else if ((b & 0xF0) == 0xE0 && (byte(i + 1) & 0xC0) == 0x80 && (byte(i + 2) & 0xC0) == 0x80) {
+        c = ((b & 0x0F) << 12) | ((byte(i + 1) & 0x3F) << 6) | (byte(i + 2) & 0x3F);
+        len = 3;
+    } else {
+        return 0;
     }
-    const size_t end = std::min(line.find_first_of(spaces, start), line.size());
-    pos = std::min(line.find_first_not_of(spaces, end), line.size());
+    const bool space = c == 0x85 || c == 0xA0 || c == 0x1680 || (c >= 0x2000 && c <= 0x200A) || c == 0x2028 ||
+                       c == 0x2029 || c == 0x202F || c == 0x205F || c == 0x3000;
+    return space ? len : 0;
+}
+
+/// Moves `pos` past the whitespace at it in `line`.
+void skipWhitespace(const std::string &line, size_t &pos) {
+    while (pos < line.size()) {
+        const size_t space = whitespaceAt(line, pos);
+        if (space == 0) break;
+        pos += space;
+    }
+}
+
+/// The first word of `line` from `pos` on, which is moved past it and the whitespace after it.
+std::string nextWord(const std::string &line, size_t &pos) {
+    skipWhitespace(line, pos);
+    const size_t start = pos;
+    while (pos < line.size() && whitespaceAt(line, pos) == 0) pos++;
+    const size_t end = pos;
+    skipWhitespace(line, pos);
     return line.substr(start, end - start);
+}
+
+/// The rest of `line` from `pos` on, without the whitespace at its end, so that a name such as
+/// "left arrow" or "Sprite 1" stays one name.
+std::string restOfLine(const std::string &line, size_t pos) {
+    size_t end = pos;
+    for (size_t i = pos; i < line.size();) {
+        const size_t space = whitespaceAt(line, i);
+        if (space != 0) {
+            i += space;
+        } else {
+            end = ++i;
+        }
+    }
+    return line.substr(pos, end - pos);
 }
 
 /// Reads an input script in the format of `thatch run --input`: one event per line, starting
@@ -464,8 +514,7 @@ bool readInputScript(const std::string &path, std::vector<ScriptedInput> &events
         bool ok = parseNumber(frame.c_str(), event.frame);
         if (kind == "key") {
             const std::string state = nextWord(line, pos);
-            // The rest of the line, so that "left arrow" stays one name.
-            event.key = line.substr(pos, line.find_last_not_of(" \t\r") + 1 - pos);
+            event.key = restOfLine(line, pos);
             event.down = state == "down";
             ok = ok && (state == "down" || state == "up") && !event.key.empty();
         } else if (kind == "mouse") {
@@ -473,8 +522,7 @@ bool readInputScript(const std::string &path, std::vector<ScriptedInput> &events
             if (first == "down" || first == "up") {
                 event.kind = ScriptedInput::MouseButton;
                 event.down = first == "down";
-                // The rest of the line, so that "Sprite 1" stays one name.
-                if (pos < line.size()) event.target = line.substr(pos, line.find_last_not_of(" \t\r") + 1 - pos);
+                event.target = restOfLine(line, pos);
             } else {
                 event.kind = ScriptedInput::MouseMove;
                 const std::string second = nextWord(line, pos);
@@ -498,6 +546,21 @@ bool readInputScript(const std::string &path, std::vector<ScriptedInput> &events
     }
     std::stable_sort(events.begin(), events.end(), [](const ScriptedInput &a, const ScriptedInput &b) { return a.frame < b.frame; });
     return true;
+}
+
+/// Where this executable is, however it was started: by path, or by name through PATH, in which
+/// case `argv[0]` alone would not say. Falls back to `argv[0]` where the system cannot tell.
+std::string executablePath(const char *argv0) {
+#if defined(__APPLE__)
+    char buffer[4096];
+    uint32_t size = sizeof buffer;
+    if (_NSGetExecutablePath(buffer, &size) == 0) return buffer;
+#elif defined(__linux__)
+    char buffer[4096];
+    const ssize_t length = readlink("/proc/self/exe", buffer, sizeof buffer - 1);
+    if (length > 0) return std::string(buffer, static_cast<size_t>(length));
+#endif
+    return argv0;
 }
 
 /// Reads the command line. Returns false after printing what is wrong.
@@ -533,7 +596,7 @@ bool parseArgs(int argc, char **argv, Options &options) {
         }
     }
     // The project file lies next to the executable, under its name with .sb3 added.
-    if (options.project.empty()) options.project = std::string(argv[0]) + ".sb3";
+    if (options.project.empty()) options.project = executablePath(argv[0]) + ".sb3";
     return true;
 }
 

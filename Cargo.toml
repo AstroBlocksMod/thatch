@@ -21,7 +21,9 @@ thatch-values = { path = "crates/thatch-values" }
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 corosensei = "0.3.4"
+ctrlc = "3.5.2"
 insta = "1.49.0"
+object = { version = "0.41.0", default-features = false, features = ["read_core", "elf", "macho", "std"] }
 tempfile = "3.27.0"
 cranelift-codegen = "0.137.1"
 cranelift-frontend = "0.137.1"

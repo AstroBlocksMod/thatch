@@ -4,8 +4,9 @@ Thatch is an optimizing compiler for Scratch projects. Today it builds standalon
 
 ```sh
 cargo build --workspace --release
-target/release/thatch run project.sb3        # compile in memory and run headless
-target/release/thatch build project.sb3 -o project && ./project
+target/release/thatch run project.sb3                   # run it in a window (build the host first, see the docs)
+target/release/thatch build project.sb3 -o dist/project # build a game with a window
+target/release/thatch run --host headless project.sb3   # compile in memory, print what sprites say
 ```
 
 The compiler is at the MVP stage: variables, operators, control blocks, custom blocks, broadcasts, waits, `say`, and the motion and looks blocks work, and every sample prints exactly what scratch-vm prints. The runtime keeps every sprite's state and describes it to a host through a C API, and the first host with a window, built on Scratch Everywhere!, draws it; pen, sound, lists and clones come next. The docs in `docs/` cover [getting started](docs/getting-started.md), the [supported blocks](docs/blocks.md), the [architecture](docs/architecture.md), the [IR](docs/ir.md), the [C ABI](docs/abi.md), the [Scratch Everywhere! host](docs/scratch-everywhere.md) and the [roadmap](docs/roadmap.md), and are published at <https://astroblocksmod.github.io/thatch/>.

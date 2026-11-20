@@ -25,6 +25,7 @@ static void say(void *data, ThatchRuntime *rt, int64_t target, const char *text,
     printf(" %s: ", think ? "thinks" : "says");
     fwrite(text, 1, len, stdout);
     putchar('\n');
+    fflush(stdout); /* a bubble shows when it is said, also when the output goes to a pipe */
 }
 
 int main(int argc, char **argv) {

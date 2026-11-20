@@ -385,11 +385,7 @@ impl Project {
         let file = std::fs::File::open(path).map_err(io)?;
         let mut reader = std::io::BufReader::new(file);
         let head = reader.fill_buf().map_err(io)?;
-        let json_start = head.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(head);
-        // An archive starts with `PK`, so a first buffer of nothing but whitespace (or an empty
-        // file) can only be JSON, however much whitespace comes before the `{`.
-        let is_json = matches!(json_start.iter().find(|b| !b.is_ascii_whitespace()), Some(b'{') | None);
-        if is_json {
+        if starts_as_json(head) {
             let text = read_limited(&mut reader, &display)?;
             return Self::from_json(text.trim_start_matches('\u{FEFF}'));
         }
@@ -403,6 +399,23 @@ impl Project {
     pub fn stage(&self) -> Option<&Target> {
         self.targets.iter().find(|t| t.is_stage)
     }
+}
+
+/// Whether the file at `path` holds a bare `project.json` rather than an `.sb3` archive, told
+/// apart by its content as [`Project::read`] does, whatever the file is called.
+pub fn is_bare_json(path: &Path) -> Result<bool, Error> {
+    let io = |source| Error::Io { path: path.display().to_string(), source };
+    let file = std::fs::File::open(path).map_err(io)?;
+    let mut reader = std::io::BufReader::new(file);
+    Ok(starts_as_json(reader.fill_buf().map_err(io)?))
+}
+
+/// Whether a file that starts with `head` is JSON. It may start with whitespace or a byte order
+/// mark. An archive starts with `PK`, so a first buffer of nothing but whitespace (or an empty
+/// file) can only be JSON, however much whitespace comes before the `{`.
+fn starts_as_json(head: &[u8]) -> bool {
+    let json_start = head.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(head);
+    matches!(json_start.iter().find(|b| !b.is_ascii_whitespace()), Some(b'{') | None)
 }
 
 /// Reads at most [`MAX_PROJECT_JSON`] bytes of UTF-8.

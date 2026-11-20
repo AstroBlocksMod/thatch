@@ -2,7 +2,7 @@
 
 Each directory holds a `project.json` and the `expected.txt` a headless run must print. The expected
 output comes from running the same project on scratch-vm, so the tests check Thatch against Scratch
-itself, not against what Thatch happened to print. `thatch run samples/<name>/project.json` runs one.
+itself, not against what Thatch happened to print. `thatch run --host headless samples/<name>/project.json` runs one.
 
 - `hello`: say formatting, casts and arithmetic.
 - `strings`: join, letter of, length and comparisons, and how numbers turn into text.

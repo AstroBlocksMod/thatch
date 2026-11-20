@@ -12,6 +12,8 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+ctrlc.workspace = true
+object.workspace = true
 tempfile.workspace = true
 thatch-codegen.workspace = true
 thatch-ir.workspace = true
@@ -21,6 +23,7 @@ thatch-scratch.workspace = true
 
 [dev-dependencies]
 thatch-abi.workspace = true
+zip.workspace = true
 
 [lints]
 workspace = true

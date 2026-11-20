@@ -42,73 +42,48 @@ cargo build --workspace
 cmake -S hosts/scratch-everywhere -B hosts/scratch-everywhere/build -DCMAKE_BUILD_TYPE=Release
 cmake --build hosts/scratch-everywhere/build
 ctest --test-dir hosts/scratch-everywhere/build --output-on-failure
+cmake --install hosts/scratch-everywhere/build
 ```
 
-The first configure downloads the libraries Scratch Everywhere! is built from. The build leaves the shared library `libscratch-everywhere` and the adapter `libthatch_host_scratch_everywhere.a` in `hosts/scratch-everywhere/build/lib/`.
+The first configure downloads the libraries Scratch Everywhere! is built from. The build leaves the shared library `libscratch-everywhere`, the adapter `libthatch_host_scratch_everywhere.a`, the host's license texts and its description for `thatch build` in `hosts/scratch-everywhere/build/lib/`. A `thatch` built in the same checkout finds them there.
 
-The test builds a small game and runs it for two seconds without a window: it plays a key press and two clicks from a script and compares the bubbles with what scratch-vm shows for the same project with a renderer. To watch that game in a window:
+The install step copies them into Thatch's data directory, where every `thatch` looks, including one installed with `cargo install`. It also installs the `libthatch_runtime.a` the host was built and tested with, since `cargo install` installs only the `thatch` executable. The data directory is `~/Library/Application Support/thatch` on macOS and `$XDG_DATA_HOME/thatch` (by default `~/.local/share/thatch`) elsewhere; `THATCH_HOME` moves it. The configure step decides where the install step puts the host, so set `THATCH_HOME` before configuring (and whenever you run `thatch`), not only for `cmake --install`; for a build directory that was configured without it, `cmake --install hosts/scratch-everywhere/build --prefix "$THATCH_HOME"` installs there instead. The directory is your own, so the install step needs no `sudo`; the configure step prints where it will install.
+
+The test builds a small game with `thatch build --host scratch-everywhere` and runs it for two seconds without a window: it plays a key press and two clicks from a script and compares the bubbles with what scratch-vm shows for the same project with a renderer. To watch that game in a window:
 
 ```sh
-hosts/scratch-everywhere/build/test/game hosts/scratch-everywhere/build/test/game.sb3
+hosts/scratch-everywhere/build/test/game
 ```
 
 ## Building a game
 
-A game for this host is four things linked together: the object file of the compiled program without `main`, the adapter, the Thatch runtime and the shared library.
+With the host built, this is the host `thatch` uses for an `.sb3`, so one command builds a game:
 
 ```sh
-mkdir -p dist
-target/debug/thatch build game.sb3 --object --no-main -o dist/game.o
-# On macOS
-c++ -o dist/game dist/game.o \
-    hosts/scratch-everywhere/build/lib/libthatch_host_scratch_everywhere.a \
-    target/debug/libthatch_runtime.a \
-    -Lhosts/scratch-everywhere/build/lib -lscratch-everywhere \
-    -liconv -Wl,-rpath,@executable_path
-# On Linux
-c++ -o dist/game dist/game.o \
-    hosts/scratch-everywhere/build/lib/libthatch_host_scratch_everywhere.a \
-    target/debug/libthatch_runtime.a \
-    -Lhosts/scratch-everywhere/build/lib -lscratch-everywhere \
-    -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc -Wl,-rpath,'$ORIGIN'
-cp hosts/scratch-everywhere/build/lib/libscratch-everywhere.* game.sb3 dist/
-dist/game dist/game.sb3
-
-# The license texts that ship with the game (see Licenses below)
-mkdir -p dist/licenses
-cp target/debug/libthatch_runtime.licenses.txt dist/licenses/thatch-runtime.txt
-cp hosts/scratch-everywhere/ScratchEverywhere/LICENSE dist/licenses/LGPL-3.0.txt
-cp "$(rustc --print sysroot)/share/doc/rust/licenses/GPL-3.0-or-later.txt" dist/licenses/GPL-3.0.txt
-
-# The libraries compiled into Scratch Everywhere!: the directories of Catalog's cache it uses
-grep -oE '^.*/src_[0-9a-f]+' hosts/scratch-everywhere/build/scratch-everywhere-dirs.txt |
-    sort -u > dist/licenses/libraries.txt
-if [ ! -s dist/licenses/libraries.txt ]; then echo "No libraries found: build the host first" >&2; fi
-while IFS= read -r dir; do
-    name=$(basename "$dir")
-    mkdir -p "dist/licenses/$name"
-    found=
-    for f in "$dir"/LICEN[CS]E* "$dir"/COPYING* "$dir"/src/LICEN[CS]E* "$dir"/src/COPYING*; do
-        if [ -f "$f" ]; then cp "$f" "dist/licenses/$name/" && found=1; fi
-    done
-    if [ -z "$found" ]; then echo "No license file in $dir" >&2; fi
-done < dist/licenses/libraries.txt
+thatch build game.sb3 -o dist/game
+dist/game
 ```
 
-The libraries after the shared library are what the Thatch runtime needs from the system. The rpath makes the game look for the library in its own directory, wherever it is started from, so the library is copied next to it. The license texts go along with it:
+and `thatch run game.sb3` builds the same game in a temporary directory and plays it. Both name the host with `--host scratch-everywhere` too, which makes a missing host an error instead of a fallback to the headless host. A host that is installed but cannot be used, say because its build was half removed, is an error either way, which says what is wrong with it.
 
-- the runtime's notices, which building the Cargo workspace writes next to `libthatch_runtime.a` (see [getting started](getting-started.md#licenses-of-a-built-executable));
-- the LGPL, version 3, which is the `LICENSE` file of the Scratch Everywhere! submodule;
-- the GPL, version 3, which the LGPL builds on. A Rust toolchain installed with rustup comes with its text in `share/doc/rust/licenses/`; the Free Software Foundation also publishes it at <https://www.gnu.org/licenses/gpl-3.0.txt>;
-- the notices of the libraries compiled into Scratch Everywhere!: lunasvg, plutovg, nlohmann/json, miniz, the stb libraries, dr_libs, TinySoundFont, Ryu, expected-lite, libdlgmod, `__getexecname` and bundle.cmake. Catalog, which fetches them, unpacks each into a directory of its own in its cache (`~/.cache/catalog/src_<hash>`), and the host's build lists every directory the library's build uses in `hosts/scratch-everywhere/build/scratch-everywhere-dirs.txt`, one per line. The last step of the recipe takes the cache's directories from that list, writes them to `dist/licenses/libraries.txt` and copies each one's license files into a folder of `dist/licenses/` named after that directory. That finds the libraries built from Catalog's cache and not whatever else the cache holds, and it says so when the list is missing or a directory has no license file. bundle.cmake has no license file upstream, so the recipe reports it and its folder stays empty.
+It writes four files into `dist/`, which together are the game:
 
-The recipe only sees libraries built from the cache. Catalog uses a library installed on the build machine instead when it finds one, and the configure step says which it took that way, one line each: `[Catalog] SDL2: resolved via system`. On a clean machine SDL2 is the only one. If the configure step names another library (a machine with a miniz development package installed, say), that library is not in the notices the recipe gathers. Check its license, and add its notice if the license asks for one and the library ends up in the game or ships with it.
+| File | What it is |
+| --- | --- |
+| `game` | The executable: the compiled program, the Thatch runtime and the adapter |
+| `libscratch-everywhere.so` (`.dylib` on macOS) | Scratch Everywhere!, which the executable loads from its own directory |
+| `game.sb3` | A copy of the project, which the costumes are read from when the game starts |
+| `game.licenses.txt` | The license notices to ship: the runtime's, then the host's (see [Licenses](#licenses)) |
 
-SDL2 is not in the game: the library loads it from the system it runs on. If you ship SDL2 with the game, add its zlib license too, which comes with SDL2 as `LICENSE.txt` (`$(brew --prefix sdl2-compat)/LICENSE.txt` with Homebrew) or as `/usr/share/doc/libsdl2-2.0-0/copyright` on Debian and Ubuntu.
+The project has to be an `.sb3` archive, since a bare `project.json` has no costumes; `thatch` tells them apart by content, not by name, so a `project.json` in a file named `.sb3` is built headless by default and refused with `--host scratch-everywhere`, while an archive named otherwise gets the host and is shipped as `game.sb3` all the same. `thatch` finds the host in `hosts/scratch-everywhere/` next to itself, then in `hosts/scratch-everywhere/build/lib` of the checkout it was built in, then in the data directory; `--host-dir` or `THATCH_HOST_DIR` point it elsewhere. The checkout comes before the data directory so that a `thatch` you just built uses the host you built with it, not an older one you installed. SDL2 is not copied: it comes from the system the game runs on.
 
-Add the statement the LGPL asks for, that the game uses Scratch Everywhere! and that the library is covered by the LGPL (see [Licenses](#licenses)). `thatch build --host scratch-everywhere` will do all of this in one step; it is the next item on the roadmap.
+`thatch` itself knows nothing about Scratch Everywhere!. The host's build writes a small description, `thatch-host.txt`, next to its libraries: which adapter to link and with which compiler driver, which shared libraries and license texts go next to the game, and that the project file does too. `thatch build --host NAME` reads the description of whichever host is named and follows it. Since `thatch` finds that file by path and acts on it, what it may say is limited: it names files in its own directory only, and the compiler driver is `cc` or `c++`. A shared library goes next to the game under the name the game loads it by, which is its soname on Linux (`libfoo.so.1` for a `libfoo.so` built with that soname) and the last part of its install name on macOS. On macOS that install name has to start with `@rpath/`, as `libscratch-everywhere.dylib`'s does, since a library with a fixed path for its install name would be loaded from that path and not from next to the game; `thatch build` refuses one. A universal library ships under one name, so all of its architectures have to give it the same install name.
 
-The game takes the project file as its argument, since the costumes are read from it at run time. Without an argument it looks for a file named like the executable with `.sb3` added. `--frames N` stops after N frames, `--seed N` seeds `pick random`, `--print-bubbles` also prints every bubble as the headless host does, and `--input FILE` plays a script of key and mouse events in the format of `thatch run --input` on top of the real keyboard and mouse. A `mouse down` or `mouse up` that names a target goes to that target wherever the pointer is, as in the headless host, so a script plays the same on both; without a name it goes to what is under the pointer.
+A build moves its files into place at the end, the executable last. If one of the moves fails, the ones before it are undone, so an older game in `dist/` is left as it was. The files a build replaces are kept in its own work directory until it is done, so nothing is left next to the game. Should one of them fail to go back, the build keeps that directory and says where the file is. Builds into the same directory move their files one build at a time, so that a game's files all come from the same build. A build does not write where a directory is, nor over the project it builds, and two of its files may not have names the file system takes for the same one (`Game` and `game` on macOS, say). The project is read once, and that copy is both compiled and shipped, and so are the host's shared libraries: the game is linked against copies made when the build starts, so a host rebuilt meanwhile cannot ship a library the game was not linked with. When the project already is where the game looks for it, as for `thatch build game.sb3` in the project's own directory, it is left as it is, and once everything is in place the build checks that it is still the version that was compiled; if it was saved meanwhile, the build is undone. Games built into the same directory share the copy of the library there, and each build replaces it, so build them with the same host build.
+
+`thatch run` passes the game's exit status on. Ctrl-C in the terminal interrupts the game and `thatch` alike, and `thatch` waits for the game to end and then removes its temporary directory. An interrupt sent to `thatch` alone ends the game too: if the game is still running a second later, `thatch` ends it. An interrupt while the game is still being built stops `thatch` when the build is over, without starting the game, and the temporary directory is removed then too.
+
+The game looks for the project file under its own name with `.sb3` added, and takes another one as an argument. `--frames N` stops after N frames, `--seed N` seeds `pick random`, `--print-bubbles` also prints every bubble as the headless host does, and `--input FILE` plays a script of key and mouse events in the format of `thatch run --input` on top of the real keyboard and mouse. A `mouse down` or `mouse up` that names a target goes to that target wherever the pointer is, as in the headless host, so a script plays the same on both; without a name it goes to what is under the pointer.
 
 ## How it fits together
 
@@ -137,4 +112,17 @@ Your game's own code stays yours, under any license you like: the LGPL makes no 
 - offer the source code of the library as it was built: the pinned commit of Scratch Everywhere! and `patches/host-hooks.patch`;
 - not forbid changing the library, or reverse engineering the game to debug such changes, in the game's own license terms.
 
-These come on top of the [notices of the Thatch runtime](getting-started.md#licenses-of-a-built-executable). The libraries compiled into Scratch Everywhere! (lunasvg, nlohmann/json and others) have notices of their own, which belong with the game as well; [Building a game](#building-a-game) shows how to gather them. SDL2 comes from the system and needs its notice only if you ship it with the game. This page is a summary to get you started, not legal advice; the license texts are what counts.
+`thatch build --host scratch-everywhere` sets a game up for this. The library is a separate file next to the executable, which finds it in its own directory, so replacing the file replaces the library. And `game.licenses.txt` holds, after the [notices of the Thatch runtime](getting-started.md#licenses-of-a-built-executable):
+
+- the statement that the game uses Scratch Everywhere! under the LGPL, and that the library may be replaced;
+- the texts of the LGPL and the GPL;
+- where the library's source is: the repository, the commit it was built from and the patch itself, in full;
+- the notices of the libraries built into Scratch Everywhere! (lunasvg, plutovg, nlohmann/json, miniz, the stb libraries and others), copied from their sources when the host was built.
+
+Ship the four files together and say in your game's credits that it uses Scratch Everywhere!, and the first two duties above are met; the fourth is about what your own license terms say.
+
+The third, offering the source, depends on how you ship the game, so it is yours to do. The notices say where the source is (the repository, the commit and the patch), but that alone is not always enough. On physical media, such as a disc or a cartridge, put the source on it as well, or include a written offer to provide it, as sections 6(a) and 6(b) of the GPL describe. For a download, offer the source from the same place, at no extra charge, and put a link to it right beside the game's download, even though the notices have it too; if the source is on another server, such as the one the notices point to, make sure it stays available for as long as you offer the game. Section 6(d) of the GPL describes this.
+
+Three more things are left to you. If the host's build could not find a license file for one of the libraries, the notices say so under that library's name, and the text has to be added by hand. The notices only cover libraries Catalog built from source: Catalog uses a library installed on the build machine instead when it finds one, and the configure step says which it took that way, one line each, such as `[Catalog] SDL2: resolved via system`. On a clean machine SDL2 is the only one. If the configure step names another library (a machine with a miniz development package installed, say), check its license, and add its notice if the license asks for one and the library ends up in the game or ships with it. And SDL2 is not in the notices because it is not in the game: if you bundle SDL2 with your game instead of relying on the system's, add its zlib license, which comes with SDL2 as `LICENSE.txt` (`$(brew --prefix sdl2-compat)/LICENSE.txt` with Homebrew) or as `/usr/share/doc/libsdl2-2.0-0/copyright` on Debian and Ubuntu.
+
+This page is a summary to get you started, not legal advice; the license texts are what counts.

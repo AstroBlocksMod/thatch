@@ -24,6 +24,9 @@ ALLOWED=(
     ".gitmodules"            # pins the submodules
     ".gitignore"             # ignores the hosts' build directories
     "tools/check-hosts.sh"   # this script
+    # `thatch build --host` looks for a host's build output by path. It reads the description the
+    # host's build wrote there and links what that names; it includes and builds nothing of a host.
+    "crates/thatch-cli/src/main.rs"
 )
 
 failed=0
